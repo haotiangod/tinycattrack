@@ -25,10 +25,18 @@ import static basemod.BaseMod.gson;
 public class Run implements Comparable<Run> {
     final RunData runData;  // 改为包访问权限
 
-    /** 存档目录名，用于匹配 gold-tracker 输出文件（如 "1_IRONCLAD"） */
+    /** 存档目录名，用于匹配 TinyCat 状态文件（如 "1_IRONCLAD"） */
     private final String runDir;
 
     public int portalFloor = -1;
+    /** 实际击破每幕 Boss 的最后一层；没有该幕 Boss 数据时为 -1。 */
+    public int act1BossFloor = -1;
+    public int act2BossFloor = -1;
+    public int act3BossFloor = -1;
+
+    /** TinyCat 自行记录的状态；-1 表示没有可用记录。 */
+    private int trackedFloor0HP = -1;
+    private int trackedGoldGained = -1;
 
     public final AbstractPlayer.PlayerClass playerClass;
 
@@ -145,6 +153,8 @@ public class Run implements Comparable<Run> {
 
         bossSwapRelic = this.bossSwapRelic();
         bossRelicChoiceStats = runData.boss_relics;
+        readTrackedState();
+        captureBossFloors();
 
         Map<Integer, Integer> potByFloor = new HashMap<>();
         for (int i = 0; i < runData.potion_use_per_floor.size(); ++i) {
@@ -407,11 +417,9 @@ public class Run implements Comparable<Run> {
     }
 
     private int parseGold() {
-        // 优先从 gold-tracker 模组输出文件读取精确累计金币
-        int exactGold = readGoldTrackerOutput();
-        if (exactGold > 0) {
+        if (trackedGoldGained >= 0) {
             goldEstimated = false;
-            return exactGold;
+            return trackedGoldGained;
         }
         goldEstimated = true;
 
@@ -463,41 +471,122 @@ public class Run implements Comparable<Run> {
         }
     }
 
-    /**
-     * 从 gold-tracker 模组输出文件中读取精确累计金币。
-     * 文件路径: runs/gold_track/{runDir}/{timestamp}.txt
-     * 解析 summary 中的 gold_own 字段。
-     *
-     * @return 累计金币，找不到则返回 -1
-     */
-    private int readGoldTrackerOutput() {
-        try {
-            String timestamp = runData.timestamp;
-            if (timestamp == null || runDir == null) {
-                return -1;
+    private void captureBossFloors() {
+        int act1 = -1;
+        int act2 = -1;
+        int act3 = -1;
+        for (BattleStats bs : runData.damage_taken) {
+            if (bs.enemies == null) {
+                continue;
             }
-
-            // 构造 gold-tracker 输出文件路径
-            String goldFilePath = "runs/gold_track/" + runDir + "/" + timestamp + ".txt";
-            FileHandle goldFile = Gdx.files.local(goldFilePath);
-            if (!goldFile.exists()) {
-                return -1;
-            }
-
-            String content = goldFile.readString();
-            for (String line : content.split("\n")) {
-                line = line.trim();
-                if (line.startsWith("gold_own:")) {
-                    String[] parts = line.split(":", 2);
-                    if (parts.length >= 2) {
-                        return Integer.parseInt(parts[1].trim());
+            String name = EncounterStats.getNameReplacementMap().getOrDefault(bs.enemies, bs.enemies);
+            switch (name) {
+                case "Hexaghost":
+                case "Slime Boss":
+                case "The Guardian":
+                    if (act1 < 0 || bs.floor < act1) {
+                        act1 = bs.floor;
                     }
-                }
+                    break;
+                case "Collector":
+                case "Automaton":
+                case "Champ":
+                    if (act2 < 0 || bs.floor < act2) {
+                        act2 = bs.floor;
+                    }
+                    break;
+                case "Time Eater":
+                case "Awakened One":
+                case "Donu and Deca":
+                    act3 = Math.max(act3, bs.floor);
+                    break;
+                default:
+                    break;
             }
-        } catch (Exception e) {
-            tinycat.logger.warn("GoldTracker: failed to read gold-tracker output", e);
         }
-        return -1;
+        act1BossFloor = act1;
+        act2BossFloor = act2;
+        act3BossFloor = act3;
+    }
+
+    /**
+     * 读取 runs/{runDir}/{start}.tinycat。
+     * 文件按“最后一次更新时间”与本局结束时间最接近来匹配，
+     * 这样中途退出再继续的对局也能对上同一条记录。
+     */
+    private void readTrackedState() {
+        if (runDir == null || runData.timestamp == null) {
+            return;
+        }
+        long endTimestamp;
+        try {
+            endTimestamp = Long.parseLong(runData.timestamp);
+        } catch (NumberFormatException e) {
+            return;
+        }
+
+        FileHandle directory = Gdx.files.local("runs/" + runDir + "/");
+        if (!directory.exists() || !directory.isDirectory()) {
+            return;
+        }
+
+        Map<String, String> best = null;
+        long bestDiff = Long.MAX_VALUE;
+        for (FileHandle file : directory.list()) {
+            if (!file.name().endsWith(".tinycat")) {
+                continue;
+            }
+            Map<String, String> state;
+            try {
+                state = parseTrackedFile(file);
+            } catch (Exception e) {
+                continue;
+            }
+            long updated = parseLong(state.get("updated_ts"), -1);
+            long start = parseLong(state.get("start_ts"), -1);
+            if (updated < 0 || start < 0 || start > endTimestamp) {
+                continue;
+            }
+            long diff = Math.abs(endTimestamp - updated);
+            if (diff > 6L * 60L * 60L || diff >= bestDiff) {
+                continue;
+            }
+            bestDiff = diff;
+            best = state;
+        }
+        if (best == null) {
+            return;
+        }
+        trackedFloor0HP = parseInt(best.get("floor0_hp"), -1);
+        trackedGoldGained = parseInt(best.get("gold_gained"), -1);
+    }
+
+    private static Map<String, String> parseTrackedFile(FileHandle file) {
+        Map<String, String> state = new HashMap<>();
+        for (String line : file.readString().split("\\r?\\n")) {
+            int eq = line.indexOf('=');
+            if (eq <= 0) {
+                continue;
+            }
+            state.put(line.substring(0, eq).trim(), line.substring(eq + 1).trim());
+        }
+        return state;
+    }
+
+    private static int parseInt(String value, int fallback) {
+        try {
+            return value == null ? fallback : Integer.parseInt(value.trim());
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    private static long parseLong(String value, long fallback) {
+        try {
+            return value == null ? fallback : Long.parseLong(value.trim());
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
     }
 
     private int getMaxHP() {
@@ -508,33 +597,14 @@ public class Run implements Comparable<Run> {
     }
 
     /**
-     * 获取第0层（Neow房间）结束时的HP值，即进入第1层前、未进行任何操作时的血量。
-     * 优先级：
-     * 1. tinycat.capturedFloor0HP（当前运行时 PostDungeonInitialize 精确捕获，最优先）
-     * 2. 伴生文件 runs/{runDir}/{timestamp}.floor0hp（往期记录，tinycat写入）
-     * 3. 估算法（仅用于历史数据，大量样本可稀释误差）：
-     *    Ironclad: floor0HP = floor1HP + floor1Damage - 6（Burning Blood 回血6）
-     *    其他角色: floor0HP = floor1HP + floor1Damage（无自带回复）
-     * 4. max_hp_per_floor[0]（最终回退，假设无任何HP变化）
-     *
-     * 注意：估算法假设第1层只有战斗HP变化，忽略遗物回血/事件等。
-     *       开启 tinycat 后运行的存档优先使用精确值。
+     * 第 1 层开始前的 HP（Neow 结束后）。
+     * 优先使用 TinyCat 的 .tinycat 记录，缺失时按第 1 层受到伤害反推。
      */
     private int getFloor0HP() {
-        // 优先级1: 当前运行时精确捕获
-        if (tinycat.capturedFloor0HP != null) {
-            return tinycat.capturedFloor0HP;
+        if (trackedFloor0HP > 0) {
+            return trackedFloor0HP;
         }
 
-        // 优先级2: 伴生文件（往期 tinycat 记录）
-        int companionHP = readCompanionFloor0HP();
-        if (companionHP > 0) {
-            return companionHP;
-        }
-
-        // 优先级3: 估算法（基于第1层受到伤害反推第0层HP）
-        // floor0HP = floor1HP + floor1Damage - 6 (Ironclad, Burning Blood回血)
-        // floor0HP = floor1HP + floor1Damage (其他角色，无自带回复)
         floor0HPEstimated = true;
         if (runData.current_hp_per_floor != null && !runData.current_hp_per_floor.isEmpty()) {
             int floor1HP = runData.current_hp_per_floor.get(0);
@@ -555,79 +625,10 @@ public class Run implements Comparable<Run> {
             }
         }
 
-        // 优先级4: 最终回退
         if (runData.max_hp_per_floor != null && !runData.max_hp_per_floor.isEmpty()) {
             return runData.max_hp_per_floor.get(0);
         }
         return 70;
-    }
-
-    /**
-     * 读取 floor0HP 伴生文件。
-     *
-     * tinycat 在开局写入时用的是“开局时间戳”，而 .run 的 timestamp 是“结束时间戳”，
-     * 两者通常不相等，所以不能只按精确文件名找。
-     * 这里先找精确文件名，再在 runDir 下找 timestamp <= 结束时间、且相差不超过 24h 的
-     * 最新一个 .floor0hp 文件，避免历史局永远读不到精确值。
-     */
-    private int readCompanionFloor0HP() {
-        if (runDir == null || runData.timestamp == null) {
-            return -1;
-        }
-        long endTimestamp;
-        try {
-            endTimestamp = Long.parseLong(runData.timestamp);
-        } catch (NumberFormatException e) {
-            return -1;
-        }
-
-        FileHandle exact = Gdx.files.local("runs/" + runDir + "/" + runData.timestamp + ".floor0hp");
-        int exactHP = readFloor0File(exact);
-        if (exactHP > 0) {
-            return exactHP;
-        }
-
-        FileHandle directory = Gdx.files.local("runs/" + runDir + "/");
-        if (!directory.exists() || !directory.isDirectory()) {
-            return -1;
-        }
-
-        FileHandle best = null;
-        long expectedStart = endTimestamp - Math.max(0, runData.playtime);
-        long bestDiff = Long.MAX_VALUE;
-        for (FileHandle file : directory.list()) {
-            String name = file.name();
-            if (!name.endsWith(".floor0hp")) {
-                continue;
-            }
-            try {
-                long timestamp = Long.parseLong(name.substring(0, name.length() - 9));
-                if (timestamp > endTimestamp) {
-                    continue;
-                }
-                long diff = Math.abs(timestamp - expectedStart);
-                if (diff <= 24L * 60L * 60L && diff < bestDiff) {
-                    bestDiff = diff;
-                    best = file;
-                }
-            } catch (NumberFormatException ignored) {
-                // 文件名不是时间戳，跳过
-            }
-        }
-        return best == null ? -1 : readFloor0File(best);
-    }
-
-    private int readFloor0File(FileHandle file) {
-        try {
-            if (file != null && file.exists() && !file.isDirectory()) {
-                int hp = Integer.parseInt(file.readString().trim());
-                tinycat.logger.debug("Loaded floor0HP from companion file: " + file.path() + " = " + hp);
-                return hp;
-            }
-        } catch (Exception e) {
-            tinycat.logger.debug("Failed to read companion file: " + e.getMessage());
-        }
-        return -1;
     }
 
     private int getPotionsCreated() {
@@ -810,21 +811,41 @@ public class Run implements Comparable<Run> {
     }
 
     public int getAct(int floor) {
+        if (act1BossFloor > 0) {
+            if (floor <= act1BossFloor) {
+                return 1;
+            }
+            if (act2BossFloor <= 0) {
+                return 2;
+            }
+            if (floor <= act2BossFloor) {
+                return 2;
+            }
+            if (act3BossFloor <= 0) {
+                return 3;
+            }
+            if (floor <= act3BossFloor) {
+                return 3;
+            }
+            return 4;
+        }
+
+        if (portalFloor > 0) {
+            if (floor <= portalFloor) {
+                return 1;
+            }
+            if (act3BossFloor > 0) {
+                return floor <= act3BossFloor ? 3 : 4;
+            }
+            return floor <= portalFloor + 3 ? 3 : 4;
+        }
+
         if (floor <= 17) {
             return 1;
         }
         if (floor <= 34) {
             return 2;
         }
-
-        if (portalFloor > 0) {
-            if (floor <= portalFloor + 3) {
-                return 3;
-            } else {
-                return 4;
-            }
-        }
-
         if (floor <= 52) {
             return 3;
         }

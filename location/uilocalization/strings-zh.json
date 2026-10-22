@@ -89,8 +89,8 @@
         "export_tier_list": "导出抓率梯度",
         "export_all_tier_list": "导出全部统计",
         "exporting_tier_list": "导出中...",
-        "export_done": "已导出：%s",
-        "export_failed": "导出失败：%s"
+        "export_done": "导出完成",
+        "export_failed": "导出失败"
     },
     
     "profile_options": {

@@ -103,8 +103,8 @@ public class StatsScreenPatch {
     private static boolean exportingTierList = false;
     private static String tierExportStatus = null;
     private static long tierExportStatusUntil = 0L;
-    /** 导出按钮相对筛选行下拉框的纵向偏移，给第二行种子筛选留出空间。 */
-    private static final float EXPORT_BUTTON_DROPDOWN_OFFSET = 160.0F;
+    /** 导出按钮固定在统计区域右上角。 */
+    private static final float EXPORT_BUTTON_X_OFFSET = 1320.0F;
 
     private static float screenPosX(float val) {
         return val * Settings.xScale;
@@ -556,22 +556,22 @@ public class StatsScreenPatch {
         List<Rate<String>> act4 = cs.encounterDeadRate.get(4);
 
         renderHeader(sb, colorForClass(Localization.get(LocalizationKeys.UI_ENCOUNTER_MORTALITY_RATE_ACT_1)), screenX, renderY);
-        renderRatesWithSummary(sb, screenX, renderY, act1, LocalizationKeys.TOTAL_ENCOUNTERS, 0, cs);
+        renderRatesWithSummary(sb, screenX, renderY, act1, LocalizationKeys.TOTAL_ENCOUNTERS, 1, cs);
         renderY -= 22.0F * Settings.scale * (act1.size() + 1);
         renderY -= 100 * Settings.scale;
 
         renderHeader(sb, colorForClass(Localization.get(LocalizationKeys.UI_ENCOUNTER_MORTALITY_RATE_ACT_2)), screenX, renderY);
-        renderRatesWithSummary(sb, screenX, renderY, act2, LocalizationKeys.TOTAL_ENCOUNTERS, 0, cs);
+        renderRatesWithSummary(sb, screenX, renderY, act2, LocalizationKeys.TOTAL_ENCOUNTERS, 2, cs);
         renderY -= 22.0F * Settings.scale * (act2.size() + 1);
         renderY -= 100 * Settings.scale;
 
         renderHeader(sb, colorForClass(Localization.get(LocalizationKeys.UI_ENCOUNTER_MORTALITY_RATE_ACT_3)), screenX, renderY);
-        renderRatesWithSummary(sb, screenX, renderY, act3, LocalizationKeys.TOTAL_ENCOUNTERS, 0, cs);
+        renderRatesWithSummary(sb, screenX, renderY, act3, LocalizationKeys.TOTAL_ENCOUNTERS, 3, cs);
         renderY -= 22.0F * Settings.scale * (act3.size() + 1);
         renderY -= 100 * Settings.scale;
 
         renderHeader(sb, colorForClass(Localization.get(LocalizationKeys.UI_ENCOUNTER_MORTALITY_RATE_ACT_4)), screenX, renderY);
-        renderRatesWithSummary(sb, screenX, renderY, act4, LocalizationKeys.TOTAL_ENCOUNTERS, 0, cs);
+        renderRatesWithSummary(sb, screenX, renderY, act4, LocalizationKeys.TOTAL_ENCOUNTERS, 4, cs);
     }
 
     // 辅助函数：渲染列表（带汇总信息作为第一行）
@@ -789,10 +789,9 @@ public class StatsScreenPatch {
 
     private static void renderTierListExportButton(SpriteBatch sb,
                                                    float screenX,
-                                                   float dropdownY,
-                                                   float sampleSizeX) {
-        float btnX = sampleSizeX;
-        float btnY = dropdownY - screenPosY(EXPORT_BUTTON_DROPDOWN_OFFSET);
+                                                   float dropdownY) {
+        float btnX = screenX + screenPosX(EXPORT_BUTTON_X_OFFSET);
+        float btnY = dropdownY;
         float btnW = screenPosX(240);
         float btnH = screenPosY(44);
         float line = Math.max(1.0F, 2.0F * Settings.scale);
@@ -816,16 +815,15 @@ public class StatsScreenPatch {
         }
 
         String text;
-        if (moreStatsScreen != null
+        boolean showStatus = tierExportStatus != null && System.currentTimeMillis() < tierExportStatusUntil;
+        if (showStatus) {
+            text = tierExportStatus;
+        } else if (moreStatsScreen != null
                 && moreStatsScreen.statTypeDropdown != null
                 && moreStatsScreen.statTypeDropdown.getSelectedIndex() == 0) {
-            text = exportingTierList
-                    ? Localization.get(LocalizationKeys.UI_EXPORTING_TIER_LIST)
-                    : Localization.get(LocalizationKeys.UI_EXPORT_ALL_TIER_LIST);
+            text = Localization.get(LocalizationKeys.UI_EXPORT_ALL_TIER_LIST);
         } else {
-            text = exportingTierList
-                    ? Localization.get(LocalizationKeys.UI_EXPORTING_TIER_LIST)
-                    : Localization.get(LocalizationKeys.UI_EXPORT_TIER_LIST);
+            text = Localization.get(LocalizationKeys.UI_EXPORT_TIER_LIST);
         }
         FontHelper.renderFontCentered(sb,
                 FontHelper.tipBodyFont,
@@ -833,17 +831,6 @@ public class StatsScreenPatch {
                 btnX + btnW / 2.0F,
                 btnY + btnH / 2.0F,
                 Settings.CREAM_COLOR);
-
-        if (tierExportStatus != null && System.currentTimeMillis() < tierExportStatusUntil) {
-            FontHelper.renderSmartText(sb,
-                    FontHelper.tipBodyFont,
-                    tierExportStatus,
-                    btnX + btnW + screenPosX(12),
-                    btnY + btnH - screenPosY(6),
-                    screenPosX(520),
-                    22.0F * Settings.scale,
-                    Settings.CREAM_COLOR);
-        }
     }
 
     private static boolean isTierListPage(int statTypeIndex) {
@@ -884,9 +871,8 @@ public class StatsScreenPatch {
         float scrollY = Utils.getField(s, StatsScreen.class, "scrollY");
         float labelY = scrollY + screenPosY(950);
         float dropdownY = labelY - screenPosY(40);
-        float sampleSizeX = screenX + screenPosX(955);
-        float btnX = sampleSizeX;
-        float btnY = dropdownY - screenPosY(EXPORT_BUTTON_DROPDOWN_OFFSET);
+        float btnX = screenX + screenPosX(EXPORT_BUTTON_X_OFFSET);
+        float btnY = dropdownY;
         float btnW = screenPosX(240);
         float btnH = screenPosY(44);
 
@@ -942,11 +928,10 @@ public class StatsScreenPatch {
         tinycat.logger.info("TierList export started: " + (scope == null ? "all" : scope.key));
         try {
             String path = TierListExporter.export(moreStatsScreen, scope);
-            tierExportStatus = Localization.get(LocalizationKeys.UI_EXPORT_DONE, path);
+            tierExportStatus = Localization.get(LocalizationKeys.UI_EXPORT_DONE);
             tinycat.logger.info("TierList export finished: " + path);
         } catch (Exception t) {
-            String message = t.getMessage() == null ? t.toString() : t.getMessage();
-            tierExportStatus = Localization.get(LocalizationKeys.UI_EXPORT_FAILED, message);
+            tierExportStatus = Localization.get(LocalizationKeys.UI_EXPORT_FAILED);
             tinycat.logger.error("TierList export failed", t);
         } finally {
             exportingTierList = false;
@@ -1051,7 +1036,7 @@ public class StatsScreenPatch {
         }
 
         if (isTierListPage(statTypeIndex)) {
-            renderTierListExportButton(sb, screenX, dropdownY, sampleSizeX);
+            renderTierListExportButton(sb, screenX, dropdownY);
         }
 
         moreStatsScreen.startDateDropdown.render(sb, startDateX, dropdownY);

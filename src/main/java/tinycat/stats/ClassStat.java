@@ -519,49 +519,12 @@ public class ClassStat {
             }
         }
 
-        // Boss -> 正确 Act 映射（与 Python analyze_hp_loss.py 一致）
+        // Boss -> Act 映射，用于把 Boss 从“非 Boss 战损”中排除
         private static final Map<String, Integer> BOSS_ACT = new HashMap<String, Integer>() {{
             put("Hexaghost", 1); put("Slime Boss", 1); put("The Guardian", 1);
             put("Collector", 2); put("Automaton", 2); put("Champ", 2);
             put("Time Eater", 3); put("Awakened One", 3); put("Donu and Deca", 3);
         }};
-
-        /**
-         * Boss Act 矫正：如果 Boss 出现在错误 Act 中，
-         * 正确 Act 已有该 Boss → 丢弃错误数据；没有 → 归入正确 Act。
-         * 与 Python analyze_hp_loss.py 的 BOSS_ACT 矫正逻辑一致。
-         */
-        private void correctBossAct() {
-            // 对 encounterActualHPLossMap 进行 Boss Act 矫正
-            for (int act : new int[]{1, 2, 3, 4}) {
-                Map<String, Mean> actMap = encounterActualHPLossMap.get(act);
-                if (actMap == null) continue;
-
-                List<String> toRemove = new ArrayList<>();
-                List<Map.Entry<String, Mean>> toMove = new ArrayList<>();
-
-                for (Map.Entry<String, Mean> entry : actMap.entrySet()) {
-                    String name = entry.getKey();
-                    Integer correctAct = BOSS_ACT.get(name);
-                    if (correctAct != null && correctAct != act) {
-                        Map<String, Mean> correctActMap = encounterActualHPLossMap.get(correctAct);
-                        if (correctActMap != null && correctActMap.containsKey(name)) {
-                            toRemove.add(name);
-                        } else {
-                            toMove.add(entry);
-                        }
-                    }
-                }
-                for (String name : toRemove) {
-                    actMap.remove(name);
-                }
-                for (Map.Entry<String, Mean> entry : toMove) {
-                    actMap.remove(entry.getKey());
-                    Integer correctAct = BOSS_ACT.get(entry.getKey());
-                    encounterActualHPLossMap.get(correctAct).put(entry.getKey(), entry.getValue());
-                }
-            }
-        }
 
         private void finaliseEncounterStats() {
             encounterHPLossMap.forEach((act, xs) -> {
@@ -868,11 +831,6 @@ public class ClassStat {
                     // 确定当前火堆选择发生的楼层属于哪一幕
                     int act = run.getAct(choice.floor);
                     
-                    // 调试：统计第二幕的 REST 行动
-                    if ("REST".equals(actionKey) && act == 2) {
-                        System.out.println("DEBUG: 第二幕 REST, floor=" + choice.floor + ", run.isHeartKill=" + run.isHeartKill);
-                    }
-                    
                     // 根据行动类型决定统计 key
                     Object statKey;
                     if ("SMITH".equals(actionKey) && choice.data != null) {
@@ -1139,9 +1097,6 @@ public class ClassStat {
             cs.bossRelicWinRateAct1 = sortedMapValues(bossRelicWinRateAct1);
             cs.bossRelicWinRateAct2 = sortedMapValues(bossRelicWinRateAct2);
             cs.bossRelicWinRateSwap = sortedMapValues(bossRelicWinRateSwap);
-
-            // Boss Act 矫正（与 Python analyze_hp_loss.py 一致）
-            correctBossAct();
 
             finaliseEncounterStats();
             cs.averageDamageTaken = avgEncounterDamage;

@@ -2,13 +2,13 @@ plugins {
     java
 }
 
-// 设置 Java 8 兼容�?
+// 设置 Java 8 兼容性
 java {
     sourceCompatibility = JavaVersion.VERSION_1_8
     targetCompatibility = JavaVersion.VERSION_1_8
 }
 
-// 设置编译编码�?UTF-8
+// 设置编译编码为 UTF-8
 tasks.withType<JavaCompile> {
     options.encoding = "UTF-8"
 }
@@ -33,9 +33,6 @@ var workshopLocation: String = "$steamappsLocation/workshop/content/646570"
 var modTheSpireLocation: String = "$workshopLocation/1605060445/ModTheSpire.jar"
 var baseModLocation: String = "$workshopLocation/1605833019/BaseMod.jar"
 var runHistoryPlusLocation: String = "$workshopLocation/2802958032/RunHistoryPlus.jar"
-// gold-tracker 是可选的运行时数据源（本项目只读取它输出的金币文件，不编译依赖它的类），
-// 未安装时自动跳过，不会导致构建失败
-var goldTrackerLocation: String = "$projectDir/../gold-tracker/build/libs/goldtracker.jar"
 var stsJar: String = "$stsInstallLocation/desktop-1.0.jar"
 
 
@@ -43,9 +40,9 @@ var stsJar: String = "$stsInstallLocation/desktop-1.0.jar"
 var modName: String = rootProject.name
 
 // 自定义版本号，每次测试时修改此处
-var versionTag: String = "V4.0.9"
+var versionTag: String = "V4.1.0"
 
-// JAR 文件命名：使�?ModTheSpire.json 中的 modid
+// JAR 文件命名：使用 ModTheSpire.json 中的 modid
 var jarBaseName: String = "TinyCat"
 
 repositories {
@@ -54,14 +51,14 @@ repositories {
 
 dependencies {
     // 只保留实际存在的依赖，缺失的 jar 会被自动跳过
-    val localDeps = listOf(modTheSpireLocation, baseModLocation, runHistoryPlusLocation, goldTrackerLocation, stsJar)
+    val localDeps = listOf(modTheSpireLocation, baseModLocation, runHistoryPlusLocation, stsJar)
         .filter { File(it).exists() }
     compileOnly(files(localDeps))
     
-    // 使用游戏自带�?Gson，不需要额外依�?
+    // 使用游戏自带的 Gson，不需要额外依赖
 }
 
-// 配置资源文件，将 location 目录包含�?resources �?
+// 配置资源文件，将 location 目录加入 resources
 sourceSets {
     main {
         resources {
@@ -70,7 +67,7 @@ sourceSets {
     }
 }
 
-// 设置资源文件的重复处理策�?
+// 设置资源文件的重复处理策略
 tasks.withType<ProcessResources> {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
@@ -91,7 +88,7 @@ tasks.register<Jar>("buildJAR") {
     group = "Slay the Spire"
     description = "Builds a fat (includes runtime dependencies) JAR in the build/libs folder"
 
-    // 设置输出�?JAR 文件名：TinyCat_test1.jar
+    // 设置输出 JAR 文件名：TinyCat_V4.1.0.jar
     archiveFileName.set("${jarBaseName}_${versionTag}.jar")
 
     // Main code

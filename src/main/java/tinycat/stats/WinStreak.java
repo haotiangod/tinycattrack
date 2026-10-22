@@ -15,11 +15,6 @@ public class WinStreak {
         this.playerClass = playerClass;
     }
 
-    public Leaderboard.Entry toEntry() {
-        return new Leaderboard.Entry(streak, playerClass, Leaderboard.STREAK_KIND, dateAchieved);
-    }
-
-
     public static WinStreak getWinStreak(List<Run> runs, AbstractPlayer.PlayerClass playerClass) {
         if (playerClass == null) {
             return getHighestRotateWinStreak(runs);

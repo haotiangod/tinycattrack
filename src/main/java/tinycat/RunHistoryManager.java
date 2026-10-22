@@ -60,6 +60,7 @@ public class RunHistoryManager {
                     }
                 })
                 .flatMap(s -> Arrays.stream(s.list()))
+                .filter(f -> f.name().endsWith(".run"))
                 .map(Run::fromFile)
                 .filter(Optional::isPresent)
                 .map(Optional::get)
@@ -96,27 +97,6 @@ public class RunHistoryManager {
                 .collect(Collectors.toList());
     }
 
-    /**
-     * 获取增量对局（用于之前的上传功能，现在主要用于本地统计）。
-     * @param lastRunTime 上次同步时间戳，null 表示全量
-     * @param outdated 需要重新计算的过期时间戳列表
-     */
-    public List<Run> getIncrementalRuns(Long lastRunTime, List<Long> outdated) {
-        if (lastRunTime == null) {
-            List<YearMonth> dates = getDates().collect(Collectors.toList());
-            YearMonth firstRun = dates.get(0);
-            YearMonth lastRun = dates.get(dates.size() - 1);
-            return getAllRuns(firstRun, lastRun, true, SeedFilter.ALL);
-        }
-
-        return allRuns.stream().filter(run -> {
-            if (run.timestamp > lastRunTime) {
-                return true;
-            }
-            return outdated.contains(run.timestamp);
-        }).collect(Collectors.toList());
-    }
-
     public List<Run> getAllRuns(YearMonth start, YearMonth end, boolean includeAbandons, SeedFilter seedFilter) {
         return getRunsInRange(allRuns, start, end, includeAbandons, seedFilter);
     }
@@ -142,40 +122,32 @@ public class RunHistoryManager {
      * 重新加载全部对局数据（清空缓存后重新扫描磁盘）。
      */
     public void refreshData() {
-        // 不要在批量加载历史 run 时使用“当前这一局”的第0层HP。
-        // capturedFloor0HP 是静态字段，若不隔离，会把当前局HP套到所有历史局上。
-        Integer captured = tinycat.capturedFloor0HP;
-        tinycat.capturedFloor0HP = null;
-        try {
-            this.allRuns.clear();
-            this.ironcladRuns.clear();
-            this.silentRuns.clear();
-            this.defectRuns.clear();
-            this.watcherRuns.clear();
+        this.allRuns.clear();
+        this.ironcladRuns.clear();
+        this.silentRuns.clear();
+        this.defectRuns.clear();
+        this.watcherRuns.clear();
 
-            loadData().forEach((run) -> {
-                switch (run.playerClass) {
-                    case IRONCLAD:
-                        this.allRuns.add(run);
-                        this.ironcladRuns.add(run);
-                        break;
-                    case THE_SILENT:
-                        this.allRuns.add(run);
-                        this.silentRuns.add(run);
-                        break;
-                    case DEFECT:
-                        this.allRuns.add(run);
-                        this.defectRuns.add(run);
-                        break;
-                    case WATCHER:
-                        this.allRuns.add(run);
-                        this.watcherRuns.add(run);
-                        break;
-                }
-            });
-        } finally {
-            tinycat.capturedFloor0HP = captured;
-        }
+        loadData().forEach((run) -> {
+            switch (run.playerClass) {
+                case IRONCLAD:
+                    this.allRuns.add(run);
+                    this.ironcladRuns.add(run);
+                    break;
+                case THE_SILENT:
+                    this.allRuns.add(run);
+                    this.silentRuns.add(run);
+                    break;
+                case DEFECT:
+                    this.allRuns.add(run);
+                    this.defectRuns.add(run);
+                    break;
+                case WATCHER:
+                    this.allRuns.add(run);
+                    this.watcherRuns.add(run);
+                    break;
+            }
+        });
 
         tinycat.logger.info("Loaded " + this.allRuns.size() + " runs.");
         tinycat.logger.info("Loaded " + this.ironcladRuns.size() + " ironclad runs.");

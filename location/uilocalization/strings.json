@@ -89,8 +89,8 @@
         "export_tier_list": "Export Tier List",
         "export_all_tier_list": "Export All Stats",
         "exporting_tier_list": "Exporting...",
-        "export_done": "Exported: %s",
-        "export_failed": "Export failed: %s"
+        "export_done": "Export complete",
+        "export_failed": "Export failed"
     },
     
     "profile_options": {

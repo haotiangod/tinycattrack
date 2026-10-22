@@ -1,27 +1,33 @@
 #!/usr/bin/env python3
 """
-用真实 .run 数据核对 TinyCat 的累计金币估算公式。
+TinyCat 金币/首层 HP 与每幕楼层归属校验。
 
-对应 Java 代码：src/main/java/tinycat/stats/Run.java
-- parseGold()
-- getNeowBonusDeduction()
-- readGoldTrackerOutput()
+对应 Java:
+- Run.parseGold()           累计获得金币：优先 .tinycat，缺失时按 gold_per_floor 估算
+- Run.getFloor0HP()         第 1 层开始前 HP：优先 .tinycat，缺失时按第 1 层伤害反推
+- Run.getAct(int)           按本局实际 Boss 楼层划分每幕
 
-说明：
-- .run 里的 gold 是“最终剩余金币”，不是累计获得金币。
-- 本脚本比较“估算累计金币”和“最终金币”，用于观察:
-  1) 估算是否低于最终金币（不可能）；
-  2) 无消费局的偏差（主要来自 Neow 起始金币估算）；
-  3) 有 gold-track 输出时的精确误差。
+数据来源:
+- runs/{角色}/*.run          RunHistoryPlus 对局记录
+- runs/{角色}/*.tinycat      TinyCat 自行记录的状态（v4.1.0+）
+
+精确金币:
+少数 .run 的 score_breakdown 会记录金币成就的实际数值，例如
+  好多好多钱 (1178): 25
+  下钱雨啦 (2015): 50
+该数值就是本局累计获得金币，可用于校验估算公式。
 
 用法:
   python scripts/validate_gold_estimate.py
   python scripts/validate_gold_estimate.py --csv gold_report.csv
 """
+
 import argparse
 import csv
+import glob
 import json
 import os
+import re
 import statistics
 import sys
 from collections import Counter, defaultdict
@@ -44,162 +50,253 @@ DEDUCTION = {
     "THREE_ENEMY_KILL": 40,
 }
 
+ACT1_BOSSES = {"Hexaghost", "Slime Boss", "The Guardian"}
+ACT2_BOSSES = {"Automaton", "Collector", "Champ"}
+ACT3_BOSSES = {"Time Eater", "Awakened One", "Donu and Deca"}
+
+GOLD_SCORE = re.compile(
+    r"(?:好多好多钱|下钱雨啦|我喜欢金币|Money Money|Raining Money|I Like Gold)\s*\((\d+)\)"
+)
+
 
 def read_json(path):
-    for enc in ("utf-8", "gbk", "utf-8-sig"):
+    raw = open(path, "rb").read()
+    for encoding in ("utf-8", "gbk", "utf-8-sig"):
         try:
-            with open(path, encoding=enc) as f:
-                return json.load(f)
-        except Exception:
+            return json.loads(raw.decode(encoding))
+        except (UnicodeDecodeError, json.JSONDecodeError):
             continue
     return None
 
 
-def gold_tracker_output(runs_root, run_dir, timestamp):
-    path = os.path.join(runs_root, "gold_track", run_dir, str(timestamp) + ".txt")
-    if not os.path.isfile(path):
-        return None
-    try:
-        with open(path, encoding="utf-8", errors="replace") as f:
-            for line in f:
-                line = line.strip()
-                if line.startswith("gold_own:"):
-                    return int(line.split(":", 1)[1].strip())
-    except Exception:
-        return None
+def estimate_gold(j):
+    floors = j.get("gold_per_floor") or []
+    if not floors:
+        return 0
+    start = 0 if j.get("neow_cost") == "NO_GOLD" else DEDUCTION.get(j.get("neow_bonus"), 45)
+    total = max(0, floors[0] - start)
+    for previous, current in zip(floors, floors[1:]):
+        if current > previous:
+            total += current - previous
+    if "MawBank" in (j.get("relics") or []):
+        total += 12
+    return total
+
+
+def exact_gold(j):
+    for line in j.get("score_breakdown") or []:
+        match = GOLD_SCORE.search(line)
+        if match:
+            return int(match.group(1))
     return None
 
 
-def estimate_gold(j, runs_root, run_dir):
-    """严格复刻 Run.parseGold 的 fallback 公式；gold-track 有值则返回精确值。"""
-    timestamp = j.get("timestamp")
-    exact = gold_tracker_output(runs_root, run_dir, timestamp) if timestamp else None
-    if exact is not None and exact > 0:
-        return exact, True
-
-    gp = j.get("gold_per_floor") or []
-    if not gp:
-        return 0, False
-
-    if j.get("neow_cost") == "NO_GOLD":
-        start = 0
-    else:
-        start = DEDUCTION.get(j.get("neow_bonus"), 45)
-
-    total = max(0, gp[0] - start)
-    for i in range(1, len(gp)):
-        diff = gp[i] - gp[i - 1]
-        if diff > 0:
-            total += diff
-    if "MawBank" in (j.get("relics") or []):
-        total += 12
-    return total, False
+def boss_floors(j):
+    floors = {1: [], 2: [], 3: []}
+    for battle in j.get("damage_taken") or []:
+        name = battle.get("enemies")
+        if name in ACT1_BOSSES:
+            floors[1].append(int(battle["floor"]))
+        elif name in ACT2_BOSSES:
+            floors[2].append(int(battle["floor"]))
+        elif name in ACT3_BOSSES:
+            floors[3].append(int(battle["floor"]))
+    act1 = min(floors[1]) if floors[1] else None
+    act2 = min(floors[2]) if floors[2] else None
+    act3 = max(floors[3]) if floors[3] else None
+    return act1, act2, act3
 
 
-def has_spending(j):
-    if j.get("items_purchased"):
-        return True
-    if j.get("items_purged"):
-        return True
-    if j.get("purchased_purges", 0):
-        return True
-    for e in j.get("event_choices") or []:
-        if e.get("gold_loss", 0) or e.get("gold_gain", 0):
-            return True
-    return False
+def act_of(floor, act1, act2, act3):
+    if act1:
+        if floor <= act1:
+            return 1
+        if not act2:
+            return 2
+        if floor <= act2:
+            return 2
+        if not act3:
+            return 3
+        if floor <= act3:
+            return 3
+        return 4
+    if floor <= 17:
+        return 1
+    if floor <= 34:
+        return 2
+    if floor <= 52:
+        return 3
+    return 4
+
+
+def read_tinycat(path):
+    state = {}
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                key, sep, value = line.strip().partition("=")
+                if sep:
+                    state[key] = value
+    except OSError:
+        return None
+    try:
+        return {
+            "start_ts": int(state.get("start_ts", -1)),
+            "updated_ts": int(state.get("updated_ts", -1)),
+            "floor0_hp": int(state.get("floor0_hp", -1)),
+            "gold_gained": int(state.get("gold_gained", -1)),
+            "floor": int(state.get("floor", -1)),
+        }
+    except ValueError:
+        return None
+
+
+def match_tinycat(run_timestamp, sidecars):
+    best = None
+    best_diff = None
+    for sidecar in sidecars:
+        if sidecar["start_ts"] < 0 or sidecar["updated_ts"] < 0:
+            continue
+        if sidecar["start_ts"] > run_timestamp:
+            continue
+        diff = abs(run_timestamp - sidecar["updated_ts"])
+        if diff > 6 * 60 * 60:
+            continue
+        if best_diff is None or diff < best_diff:
+            best, best_diff = sidecar, diff
+    return best, best_diff
+
+
+def summarize(values):
+    if not values:
+        return "n=0"
+    ordered = sorted(values)
+    p90 = ordered[min(len(ordered) - 1, int(len(ordered) * 0.9))]
+    return "n=%d mean=%.1f median=%.1f p90=%d max=%d" % (
+        len(values),
+        statistics.mean(values),
+        statistics.median(values),
+        p90,
+        max(values),
+    )
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--runs", default=DEFAULT_RUNS)
-    ap.add_argument("--csv", default="")
-    args = ap.parse_args()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--runs", default=DEFAULT_RUNS)
+    parser.add_argument("--csv", default="")
+    args = parser.parse_args()
 
     if not os.path.isdir(args.runs):
         print("runs directory not found:", args.runs)
         return 2
 
     rows = []
-    for run_dir in sorted(os.listdir(args.runs)):
-        d = os.path.join(args.runs, run_dir)
-        if not os.path.isdir(d) or run_dir == "gold_track":
+    act_ranges = defaultdict(lambda: [10 ** 9, -1])
+    act_boss_floors = {1: Counter(), 2: Counter(), 3: Counter()}
+    boss_errors = []
+    changed_floors = Counter()
+
+    for path in glob.glob(os.path.join(args.runs, "*", "*.run")):
+        j = read_json(path)
+        if not j:
             continue
-        for name in sorted(os.listdir(d)):
-            if not name.endswith(".run"):
-                continue
-            j = read_json(os.path.join(d, name))
-            if not j:
-                continue
-            estimate, exact = estimate_gold(j, args.runs, run_dir)
-            final_gold = int(j.get("gold", 0))
-            char = j.get("character_chosen", "?")
-            rows.append({
-                "run": name,
+        run_dir = os.path.basename(os.path.dirname(path))
+        act1, act2, act3 = boss_floors(j)
+        if act1:
+            act_boss_floors[1][act1] += 1
+        if act2:
+            act_boss_floors[2][act2] += 1
+        if act3:
+            act_boss_floors[3][act3] += 1
+
+        for battle in j.get("damage_taken") or []:
+            floor = int(battle["floor"])
+            act = act_of(floor, act1, act2, act3)
+            act_ranges[act][0] = min(act_ranges[act][0], floor)
+            act_ranges[act][1] = max(act_ranges[act][1], floor)
+            old_act = 1 if floor <= 17 else 2 if floor <= 34 else 3 if floor <= 52 else 4
+            if old_act != act:
+                changed_floors[(battle.get("enemies"), old_act, act)] += 1
+            name = battle.get("enemies")
+            expected = 1 if name in ACT1_BOSSES else 2 if name in ACT2_BOSSES else 3 if name in ACT3_BOSSES else None
+            if expected and expected != act:
+                boss_errors.append((os.path.basename(path), name, floor, act1, act2, act3, act))
+
+        exact = exact_gold(j)
+        estimate = estimate_gold(j)
+        sidecar_dir = os.path.join(args.runs, run_dir)
+        sidecars = [
+            state
+            for state in (
+                read_tinycat(p) for p in glob.glob(os.path.join(sidecar_dir, "*.tinycat"))
+            )
+            if state is not None
+        ]
+        tracked, tracked_diff = match_tinycat(int(j.get("timestamp", 0)), sidecars)
+
+        rows.append(
+            {
+                "run": os.path.basename(path),
                 "run_dir": run_dir,
-                "character": char,
-                "estimate": estimate,
-                "final": final_gold,
-                "diff": estimate - final_gold,
-                "exact_source": exact,
-                "spending": has_spending(j),
+                "character": j.get("character_chosen", "?"),
                 "neow_bonus": j.get("neow_bonus") or "",
-                "neow_cost": j.get("neow_cost") or "",
-            })
+                "gold_exact": exact if exact is not None else "",
+                "gold_estimate": estimate,
+                "estimate_abs_error": abs(estimate - exact) if exact is not None else "",
+                "tracked_gold": tracked["gold_gained"] if tracked else "",
+                "tracked_floor0_hp": tracked["floor0_hp"] if tracked else "",
+                "matched_seconds": tracked_diff if tracked else "",
+            }
+        )
 
     print("runs:", len(rows))
-    print("gold-track exact:", sum(1 for r in rows if r["exact_source"]))
-    print("estimate < final:", sum(1 for r in rows if r["diff"] < 0))
-    print("estimate == final:", sum(1 for r in rows if r["diff"] == 0))
-    print("estimate > final:", sum(1 for r in rows if r["diff"] > 0))
-    diffs = [r["diff"] for r in rows]
-    print("diff estimate-final: mean=%.2f median=%.2f min=%d max=%d" % (
-        statistics.mean(diffs), statistics.median(diffs), min(diffs), max(diffs)))
+    exact_rows = [row for row in rows if row["gold_exact"] != ""]
+    print("runs with exact gold in score_breakdown:", len(exact_rows))
+    if exact_rows:
+        errors = [row["estimate_abs_error"] for row in exact_rows]
+        signed = [row["gold_estimate"] - row["gold_exact"] for row in exact_rows]
+        print("estimator abs error:", summarize(errors))
+        print(
+            "estimator signed error (estimate-exact): mean=%.1f median=%.1f min=%d max=%d"
+            % (statistics.mean(signed), statistics.median(signed), min(signed), max(signed))
+        )
+        by_bonus = defaultdict(list)
+        for row in exact_rows:
+            by_bonus[row["neow_bonus"]].append(row["estimate_abs_error"])
+        print("estimator abs error by neow bonus:")
+        for bonus, values in sorted(by_bonus.items(), key=lambda item: -len(item[1])):
+            print("  %-24s %s" % (bonus, summarize(values)))
 
-    no_spend = [r for r in rows if not r["spending"]]
-    print("\nno-spend runs:", len(no_spend))
-    if no_spend:
-        nd = [r["diff"] for r in no_spend]
-        print("  diff: mean=%.2f median=%.2f min=%d max=%d" % (
-            statistics.mean(nd), statistics.median(nd), min(nd), max(nd)))
-        under = [r for r in no_spend if r["diff"] < 0]
-        print("  estimate < final:", len(under), "(%.1f%%)" % (100.0 * len(under) / len(no_spend)))
-        for r in sorted(no_spend, key=lambda x: x["diff"])[:10]:
-            print("   ", r["character"], r["neow_bonus"], r["neow_cost"], "est", r["estimate"], "final", r["final"], "diff", r["diff"])
+    tracked_rows = [row for row in rows if row["tracked_gold"] != ""]
+    print("\nruns matched to .tinycat:", len(tracked_rows))
+    if tracked_rows:
+        diffs = [
+            row["tracked_gold"] - row["gold_exact"]
+            for row in tracked_rows
+            if row["gold_exact"] != ""
+        ]
+        if diffs:
+            print("tracked gold vs exact:", summarize([abs(value) for value in diffs]))
+        floor0 = [row["tracked_floor0_hp"] for row in tracked_rows if row["tracked_floor0_hp"] > 0]
+        print("tracked floor0_hp:", summarize(floor0))
 
-    by_char = defaultdict(list)
-    for r in rows:
-        by_char[r["character"]].append(r["diff"])
-    print("\nby character:")
-    for char, ds in sorted(by_char.items()):
-        print(" ", char, "n=", len(ds), "mean=%.2f median=%.2f" % (statistics.mean(ds), statistics.median(ds)))
-
-    # 第 1 层战损：TinyCat 当前口径是 damage - (Ironclad ? 6 : 0)
-    print("\nfloor-1 damage estimate:")
-    by_char_floor = defaultdict(list)
-    for run_dir in sorted(os.listdir(args.runs)):
-        d = os.path.join(args.runs, run_dir)
-        if not os.path.isdir(d) or run_dir == "gold_track":
-            continue
-        for name in sorted(os.listdir(d)):
-            if not name.endswith(".run"):
-                continue
-            j = read_json(os.path.join(d, name))
-            if not j:
-                continue
-            f1 = [b for b in (j.get("damage_taken") or []) if int(b.get("floor", 0)) == 1]
-            if not f1:
-                continue
-            damage = int(f1[0].get("damage", 0))
-            loss = damage - (6 if j.get("character_chosen") == "IRONCLAD" else 0)
-            by_char_floor[j.get("character_chosen", "?")].append(loss)
-    for char, vals in sorted(by_char_floor.items()):
-        print(" ", char, "n=", len(vals), "mean=%.2f median=%.2f" % (statistics.mean(vals), statistics.median(vals)))
+    print("\nact mapping check:")
+    for act in sorted(act_boss_floors):
+        print("  act %d boss floors: %s" % (act, dict(sorted(act_boss_floors[act].items()))))
+    print("  encounter floor ranges:", {act: tuple(act_ranges[act]) for act in sorted(act_ranges)})
+    print("  boss assigned to wrong act:", len(boss_errors))
+    for error in boss_errors[:10]:
+        print("   ", error)
+    print("  floors reclassified vs old 17/34/52 thresholds:", sum(changed_floors.values()))
+    for key, count in changed_floors.most_common(10):
+        print("   ", key, count)
 
     if args.csv:
-        with open(args.csv, "w", newline="", encoding="utf-8-sig") as f:
-            w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
-            w.writeheader()
-            w.writerows(rows)
+        with open(args.csv, "w", newline="", encoding="utf-8-sig") as handle:
+            writer = csv.DictWriter(handle, fieldnames=list(rows[0].keys()))
+            writer.writeheader()
+            writer.writerows(rows)
         print("csv:", args.csv)
     return 0
 

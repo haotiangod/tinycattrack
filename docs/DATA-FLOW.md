@@ -1,16 +1,17 @@
 # TinyCat 数据流与统计口径
 
-> 这份文档用自然语言描述 TinyCat 当前实际运行逻辑，便于核对 bug。
+> 描述当前 4.1.0 的实际逻辑，便于核对统计结果。
 > 代码位置以 `src/main/java/tinycat/` 为准。
 
-## 1. 从游戏到 `.run`
+## 1. 从游戏到统计界面
 
 ```text
 游戏事件
   → tinycat.java 订阅 BaseMod 事件
-  → Run 采集单局数据
-  → .run JSON 文件（RunHistoryPlus 写出）
+  → RunStateTracker 每帧写 .tinycat（第 1 层 HP / 累计金币）
+  → RunHistoryPlus 写出 .run JSON
   → RunHistoryManager 批量读取
+  → Run 合并 .tinycat + 解析 .run
   → Run.valid() 过滤
   → ClassStat 聚合
   → MoreStatsScreen / StatsScreenPatch 渲染
@@ -21,83 +22,85 @@
 
 - `@SpireInitializer` 标记入口。
 - 构造时创建 `Config`，`BaseMod.subscribe(this)`。
-- `initialize()`：创建单例、加载 `Localization`、`NameMapper`。
-- `PostInitialize`：创建 `RunHistoryManager`，注册 badge 和设置面板。
-- `PostDungeonInitialize`：抓当前玩家 HP，作为第 0 层 HP，写 `runs/{runDir}/{开局时间戳}.floor0hp`。
+- `initialize()`：加载 `Localization`、`NameMapper`。
+- `PostInitialize`：创建 `RunHistoryManager`，注册 badge 与设置面板。
+- `PostDungeonUpdate`：每帧调用 `RunStateTracker.update()`。
 
-已知问题：`capturedFloor0HP` 是静态字段；批量加载历史局时会污染 floor 1 战损。现在 `RunHistoryManager.refreshData()` 会在加载期间临时置空。
+### RunStateTracker
+
+- 文件：`runs/{runDir}/{start_ts}.tinycat`，key=value 纯文本。
+- `runDir` 与 RunHistoryPlus 一致：默认存档位为角色名，其他存档位为 `{slot}_{角色名}`。
+- 只在楼层或 `CardCrawlGame.goldGained` 变化时写文件，避免每帧 IO。
+- 进入第 1 层且 `playtime < 300` 时记录 `floor0_hp` 和 `start_gold`；读档续玩不重复记录。
+- 楼层刷新后，按 `now - playtime` 在 1 小时窗口内寻找最近的 `.tinycat` 重新挂接。
 
 ### RunHistoryManager
 
-- 只扫描当前存档位对应的 `runs/` 子目录。
-- 排除 `gold_track`。
-- 每个文件交给 `Run.fromFile()`。
-- `Run.valid()` 过滤：
-  - 必须是 A20；
-  - 不能是每日、特殊局、无尽；
-  - 不能含 Mod 卡（名称含 `:`）；
-  - 命中硬编码黑名单的对局剔除。
-- 种子局保留，由统计面板的种子筛选（全部/不含/仅种子）控制。
-- 按角色放入 Ironclad / Silent / Defect / Watcher 四个角色列表；另有 All 汇总列表，All 不是第五个角色。
+- 只扫描当前存档位对应的 `runs/` 子目录，排除 `gold_track`。
+- 只读取 `.run` 文件，交给 `Run.fromFile()`；单个文件解析失败会被跳过。
+- `Run.valid()` 过滤：A20、非每日/特殊/无尽、无 Mod 内容、黑名单。
+- 种子局保留，由统计面板的种子筛选控制。
+- 按角色分为四个列表；All 是四角色汇总，不是第五个角色。
 
 ### Run
 
 - `RunData` 是 `.run` 的 Gson 映射。
-- 构造时解析角色、碎心、A20、时间戳、放弃状态、卡组、遗物、Boss 遗物、卡牌选择、战斗伤害等。
-- `valid()` 做上面那套过滤。
-- `getAct(floor)`：`<=17` 第一幕，`<=34` 第二幕，`<=52` 第三幕，否则第四幕；传送门事件特殊处理。
-- `.run` 文件实际是 GBK；现在 `readRunText()` 严格尝试 UTF-8 → GBK → 系统默认，并去 BOM。
+- 构造顺序：解析基础字段 → `readTrackedState()` 匹配 `.tinycat` → `captureBossFloors()` → 计算 HP/金币/伤害。
+- `.run` 文本严格尝试 UTF-8 → GBK（去 BOM），兼容非中文 locale。
 
-## 2. 卡牌抓率
+## 2. 幕划分
 
-### Run 的卡牌选择
+`Run.getAct(floor)` 不按固定楼层，而是从 `damage_taken` 识别 Boss 实际楼层：
+
+- 第一幕 Boss：Hexaghost / Slime Boss / The Guardian，取最小楼层。
+- 第二幕 Boss：Automaton / Collector / Champ，取最小楼层。
+- 第三幕 Boss：Time Eater / Awakened One / Donu and Deca，取最大楼层。
+- 第一幕：`floor <= act1BossFloor`。
+- 第二幕：`floor <= act2BossFloor`。
+- 第三幕：`floor <= act3BossFloor`。
+- 其余为第四幕。
+- 缺少 Boss 数据时回退 `<=17 / <=34 / <=52`；传送门路线用 `portalFloor` 特殊处理。
+- Mind Bloom 的 Boss 战在数据中名为 `"Mind Bloom Boss Battle"`，不会干扰识别。
+
+真实数据（1,113 局）分布：
+
+| 幕 | 常规 Boss 层 | 偏移情况 |
+|---|---|---|
+| 第一幕 | 16 | 17（15 局） |
+| 第二幕 | 33 | 34（40 局） |
+| 第三幕 | 51 | 52（63 局）、53（5 局）、50（1 局） |
+| 第四幕 | 矛盾 55–58，心脏 56–59 | 篝火 53/54，商店 54/55 |
+
+旧边界 `<=17/<=34/<=52` 只会把 5 条 52/53 层的第三幕 Boss 误归第四幕；新算法 Boss 归属 0 误判。
+
+## 3. 卡牌抓率
 
 `Run` 遍历 `runData.card_choices`：
 
 - `picked`：被选中的卡。
-- `not_picked`：没被选的卡。
-- 如果选的是普通卡，会额外把 `SKIP` 或 `Singing Bowl` 加入 `not_picked`。
+- `not_picked`：没被选的卡；跳过时额外计入 `SKIP` / `Singing Bowl`。
 
-### ClassStat.cardPickStats
+`ClassStat.cardPickStats`：
 
-- `floor >= 17` → `cardPicksAfterAct1`。
-- 否则 → `cardPicksAct1`。
-- 被选中的卡：`Rate.win++`。
-- 没被选的卡：`Rate.loss++`。
-- 因此：
-  - `Rate.win = picked`
-  - `Rate.total = offered`
-  - 抓率 = `win / total`
+- `floor >= 17` → `cardPicksAfterAct1`，否则 → `cardPicksAct1`。
+- 被选中的卡 `win++`，没被选的卡 `loss++`。
+- 抓率 = `win / total`。
+- 这里不用动态幕边界：17 层是 Act 1 Boss 后的选牌，统计页统一归入“第一幕后”。
 
-注意：这里**没有**用 `Run.getAct(floor)` 分幕。floor 17 是 Act 1 Boss 后的选牌，现有口径归到“第一幕后”，和统计页一致。
+Tier 导出复用这两组数据：`Singing Bowl` 并入 `SKIP`，剔除 `CURSE/STATUS`，按 `picked/offered` 重算并分档。
 
-### Tier 导出
+## 4. Boss 遗物抓率
 
-`TierListBuilder` 复用 `cardPicksAct1 / cardPicksAfterAct1`：
+- 第 1 次 Boss 遗物选择 → 第一幕；第 2 次 → 第二幕。
+- `picked` 为空或 `"SKIP"` → `SKIP`。
+- 被选中 `win++`，未选中 `loss++`，`win/total` 为抓率。
+- 交换 Boss 遗物单独统计。
 
-- `Singing Bowl` 并入 `SKIP`。
-- `CURSE/STATUS` 卡剔除。
-- 按 `picked/offered` 重新算 `rate`，再分档。
+## 5. 战损
 
-## 3. Boss 遗物抓率
+### 数据来源
 
-`ClassStat.bossRelicStats`：
-
-- 第 1 次 Boss 遗物选择 → Act 1。
-- 第 2 次 → Act 2。
-- `picked` 为空或 `"SKIP"` → `"SKIP"`。
-- 被选中的遗物 `win++`，没被选的 `loss++`。
-- 所以 `win/total` 就是抓率。
-
-Tier 导出按 Act 1 / Act 2 两组，SKIP 保留，图片来自 `RelicLibrary`。
-
-## 4. 战损
-
-### 数据字段
-
-`.run` 里有：
-
-- `damage_taken`：每场战斗的 `damage`、楼层、回合数、敌人。
+- `damage_taken`：每场战斗的伤害、楼层、回合、敌人。
 - `current_hp_per_floor`：每层结束后的 HP。
 - `max_hp_per_floor`：每层最大 HP。
 
@@ -105,16 +108,12 @@ Tier 导出按 Act 1 / Act 2 两组，SKIP 保留，图片来自 `RelicLibrary`�
 
 `Run.getFloor0HP()`：
 
-1. `tinycat.capturedFloor0HP`（当前运行时捕获）。
-2. `runs/{runDir}/*.floor0hp` 伴生文件：
-   - 先找精确文件名；
-   - 找不到则按 `结束时间 - playtime` 估算开局时间，找 24 小时内最接近的文件。
-3. 估算法：
-   - Ironclad：`floor1HP + floor1Damage - 6`（Burning Blood 回 6）；
-   - 其他角色：`floor1HP + floor1Damage`。
-4. `max_hp_per_floor[0]`。
+1. `.tinycat` 的 `floor0_hp`（精确，需开局第 1 层 300 秒内记录）。
+2. 估算：`floor1HP + floor1Damage`；Ironclad 再减 6（Burning Blood）。
+3. `max_hp_per_floor[0]`。
+4. 兜底 70。
 
-### 每场战斗的实际战损
+### 实际战损
 
 ```text
 hpBefore = 第 1 层用 floor0HP，其他层用上一层结束 HP
@@ -122,9 +121,9 @@ hpAfter  = 本层结束 HP
 actualHPLoss = hpBefore - hpAfter
 ```
 
-- 正数 = 掉血。
-- 负数 = 回血，保留负值。
+- 正数掉血，负数回血，保留负值。
 - `damage` 是战斗内伤害，`actualHPLoss` 是净变化。
+- 第 1 层 HP 不可靠时在 UI/CSV 标注估算。
 
 ### ClassStat
 
@@ -133,38 +132,33 @@ actualHPLoss = hpBefore - hpAfter
 - 平均实际战损；
 - 平均无回复/有回复战损；
 - 每幕总战损；
-- 战斗/事件分开统计。
+- 战斗与事件分开统计。
 
-## 5. 金币
+## 6. 金币
 
 `Run.parseGold()`：
 
-1. 优先读 `runs/gold_track/{runDir}/{timestamp}.txt` 的 `gold_own`。
-2. 没有则用 `gold_per_floor`：
-   - 第一层金币 - Neow 开局扣除；
+1. `.tinycat` 的 `gold_gained`（`CardCrawlGame.goldGained`，精确累计获得金币）。
+2. 没有状态文件时用 `gold_per_floor` 估算：
+   - 第一层金币 - Neow 扣除常数；
    - 后续正增量；
    - MawBank +12。
+3. 估算结果 `goldEstimated=true`，UI/CSV 标注。
 
-这个值是**累计获得金币的估算**，不是最终剩余金币。
+`.run` 的 `gold` 是最终剩余金币，精确，但不是本 Mod 统计的“累计获得金币”口径。
 
-`.run` 里的 `gold` 是最终剩余金币，精确，但当前没直接使用。
+金币估算在 305 局可提取真值的数据上：平均绝对误差 38.0，中位 39，P90 64，最大 160，带符号平均 -2.5。详见 `STATE-NOTES-AND-GOLD.md`。
 
-`ClassStat.averageGold` 对 `run.gold` 求平均。当前口径已确认：**累计获得金币，估算值**；UI 会显示“（估算）”，CSV 会带 `gold_estimated` 说明。
+## 7. Rate 的语义
 
-`.run` 里没有累计获得金币字段，只有最终剩余金币 `gold`；逐事件精确累计需要额外数据源（StateNotes 许可证/接入见 `STATE-NOTES-AND-GOLD.md`）。
-
-**第 1 层战损**：`.run` 的第 1 层 HP 不可靠，当前用“第 1 层受到伤害”估算；Ironclad 再减 6（Burning Blood）。UI 会显示“第1层战损：估算”。
-
-## 6. Rate 的语义
-
-`Rate` 的 `win/loss` 含义由调用方决定：
+`Rate` 的 `win/loss` 由调用方决定：
 
 - 卡牌/Boss 遗物：`win` = 被选，`loss` = 没被选，`percent` = 抓率。
-- 火堆/商店：`win` = 该局胜利，`loss` = 该局失败，`percent` = 胜率，不是选择率。
+- Neow：选取率与胜率是两组独立的 Rate。
+- 战斗/事件/火堆/商店：`win` = 该局胜利，`loss` = 该局失败，`percent` = 胜率。
+- 火堆/商店行动同时展示 `(win/total)` 次数，便于区分样本量。
 
-这是后续重构要明确的点，避免把“胜率”误读成“选择率”。
-
-## 7. 导出
+## 8. 导出
 
 ```text
 StatsScreenPatch 当前页面
@@ -174,55 +168,14 @@ StatsScreenPatch 当前页面
   → TierListExporter（CSV/JSON/HTML/README/zip）
 ```
 
-导出范围：
+- 总体统计 → 四组 Tier List + `summary.csv` + `all_stats.csv` 全维度。
+- 第一幕卡牌 / 第一幕后卡牌 / Boss 遗物页面可导出对应 Tier List。
+- 导出按钮位于页面右上角，不再遮挡内容；成功/失败只显示提示，路径写日志。
 
-- 总体统计 → `ALL`：四组 Tier List + 全部统计 CSV
-- 第一幕卡牌选取率 → `cards_act1`
-- 第一幕后卡牌选取率 → `cards_after_act1`
-- BOSS 遗物选取率 → `boss_relics_act1 + boss_relics_act2`
+CSV：
 
-按钮只在上述页面出现；其他页面不显示。
+- `data.csv`：Tier 条目，含 `character_id`、`character_kind`、`seed_filter`。
+- `summary.csv`：角色/筛选/基础统计/估算标记；`character_count=4`，`ALL` 是四角色汇总。
+- `all_stats.csv`：长表，覆盖所有 ClassStat 维度。
 
-CSV 文件：
-
-- `data.csv`：Tier List 条目；每行带 `character_id`、`character_kind`（`character`/`aggregate`）和 `seed_filter`
-- `summary.csv`：角色/筛选/基础统计/估算标记；`character_count=4`，`ALL` 是四角色汇总
-- `all_stats.csv`：长表，覆盖所有 ClassStat 维度（卡牌、Neow、Boss 遗物、战斗、事件、遗物、删牌、火堆、商店、Meta 等），开头带角色/种子筛选上下文
-
-种子筛选会改变抓率样本：同一张卡在包含/排除种子局时可能跨过档位边界；`min_sample` 过小（尤其 0）会让 1/1 这种小样本直接进入 S 档。
-
-## 8. 金币估算校验
-
-脚本：`scripts/validate_gold_estimate.py`
-
-在 1113 个真实 `.run` 上运行的结果：
-
-- `gold_track` 精确文件：0 个
-- 估算累计金币始终 ≥ 最终金币（1113/1113）
-- 估算 - 最终 的平均差：813.25，中位数 761
-- 没有“无消费局”可用于隔离 Neow 起始金币误差
-- 第 1 层战损估算（Ironclad damage-6）均值约 -0.10，中位数 0.00；其他角色均值 1–3
-
-结论：当前 `.run` 无法验证累计金币真值；公式只能保证“累计估算 ≥ 最终剩余”，差额主要是消费。要精确必须接逐事件金币数据源，且需许可证。
-
-## 9. 当前重构状态
-
-已完成：
-
-- 名称映射统一到 `CardNameNormalizer`
-- `.run` UTF-8/GBK
-- floor0 HP 隔离与伴生文件匹配
-- `Utils.round` 改为小数位
-- 角色颜色按索引
-- 图片缓存
-- `tierlist.jpg/png`
-- 总体页导出全部统计 CSV（`summary.csv` + `all_stats.csv`）
-- 修复 `averageScore` 被重复累加、以及 `eventStats` 为空时跳过 deck/gold 统计的问题
-
-待做：
-
-- `ClassStat` 拆分 collector
-- `StatsScreenPatch` 拆分 renderer
-- `MoreStatsScreen` 5 份 ClassStat 缓存/增量
-- 导出后台化/进度
-- StateNotes 授权后接精确金币/HP
+种子筛选会改变抓率样本，小样本（尤其 `min_sample=0`）容易跨档。

@@ -1,59 +1,71 @@
-# State Notes / 金币与 StateNotes 接入评估
+# 金币与第 0 层 HP 追踪 / StateNotes 许可证评估
 
-> 本文件记录 2026-10-22 对 `StateNotes-0.4.0-local-test.zip` 的许可证与数据能力评估。
-> 结论：**不要把 StateNotes/STSStateSaver 的代码或 JAR 打进 TinyCat 或导出包。**
+> 2026-10-22 对 `StateNotes-0.4.0-local-test.zip` 做了许可证与数据能力评估。
+> 最终结论：**TinyCat 不需要 StateNotes 或 STSStateSaver，也没有使用、复制或再分发它们的任何代码。**
 
 ## 1. 许可证结论
 
 - `State Notes` 项目自有代码：MIT（Copyright (c) 2026 CYZ）。
 - 内嵌的 `STSStateSaver / SaveStateMod 1.3.0`（Board Engineer）：
-  - 包内 `NOTICE.txt` 明确写明：上游没有 LICENSE/COPYING/NOTICE，也没有再分发授权。
+  - 包内 `NOTICE.txt` 写明上游没有 LICENSE/COPYING/NOTICE，也没有再分发授权。
   - 上游 issue #13 正在请求授权：<https://github.com/boardengineer/STSStateSaver/issues/13>
-- 因此：
-  - TinyCat 可以按 MIT 使用 State Notes **自己**的代码（保留版权/许可声明），但**不能**把内嵌的 `savestate.*` 一起再分发。
-  - 不能把 `STS1StateNotes.jar` 放进 TinyCat 的 release/zip。
-  - “免费/非商业”不是许可证，不能替代授权。
+- 因此不能把 `STS1StateNotes.jar` 或 `savestate.*` 打进 TinyCat 的 JAR、release 或导出包。“免费/非商业”不能替代许可证。
 
-## 2. 它能提供什么
+## 2. 为什么不需要它
 
-- `savestate.CreatureState` / `PlayerState` 有 `gold` 当前值。
-- `sts1state.Snapshot` 会记录 `gold`、`currentHealth`、`maxHealth` 等快照字段。
-- `sts1state.Recorder` 写出 `events.jsonl`、`run.json`、`segment-*.json`，位于它的本地数据目录。
-- 这些是**当前/逐回合状态**，不是“整局累计获得金币”。累计获得金币还需要金币获取事件，或结合购买/事件花费还原。
+评估时确认了两个游戏原生数据源，足以覆盖需求：
 
-## 3. 金币口径
+| 数据 | 原生来源 | 精度 |
+|---|---|---|
+| 累计获得金币 | `CardCrawlGame.goldGained`（`public static int`） | 精确，随存档重置/恢复 |
+| 当前金币 | `AbstractPlayer.gold` | 精确 |
+| 当前 HP / 楼层 | `AbstractPlayer.currentHealth`、`AbstractDungeon.floorNum` | 精确 |
+| 开局第 1 层 HP | 开局后 `PostDungeonUpdate` 时读取 `currentHealth` | 精确（未经过战斗） |
 
-TinyCat 当前 `Run.parseGold()`：
+StateNotes 的逐回合快照只能看到“当前金币”，无法单独还原累计获得金币；而 `goldGained` 本身就是累计值。因此接入 StateNotes 既无必要，也会引入许可证风险。
 
-1. 优先读 `runs/gold_track/{runDir}/{timestamp}.txt` 的 `gold_own`（可选 gold-tracker）。
-2. 否则用 `gold_per_floor` 估算：
-   - 第一层金币 - Neow 开局扣除；
-   - 加上后续正增量；
-   - MawBank +12。
-3. 这个值是**累计获得金币**的估算，不是最终剩余金币。
+原计划中的“联系上游作者”“无许可证时绕过 save 类 Mod”均不再需要。
 
-可选方向：
+## 3. TinyCat 的实现
 
-- **最终剩余金币**：`.run` 的 `gold` 字段已经是精确值，不需要 StateNotes；可直接在 `Run` 中新增/使用最终金币字段。
-- **累计获得金币**：需要“获得金币”的事件流。StateNotes 的逐回合 `gold` 只能看当前值，不能单独还原累计获得；需要额外事件/购买花费数据。
-- **可选只读适配**：TinyCat 检测到用户安装 StateNotes 后，只读它的本地 JSON；不打包、不修改、不再分发。必须先获得作者对字段稳定性和读取行为的确认。
-
-## 4. 联系作者的建议问题
+`RunStateTracker` 实现 `PostDungeonUpdateSubscriber`，每帧检查，仅在楼层或 `goldGained` 变化时写文件：
 
 ```text
-你好，我是 TinyCat（MPL-2.0 本地统计 mod）的作者。
-我想以“可选、只读”的方式读取 State Notes / STSStateSaver 的本地快照，
-用于精确记录每层 HP 和金币，不修改、不打包、不再分发你们的代码。
-
-想确认：
-1) 是否允许 TinyCat 读取你们导出的本地 JSON？
-2) STSStateSaver 目前没有许可证，是否可以提供 MIT/Apache 许可或书面授权？
-3) 是否有稳定的字段/schema（floor、gold、currentHealth）？
+runs/{runDir}/{start_ts}.tinycat
+version=1
+start_ts=<开局 Unix 秒>
+floor0_hp=<开局第 1 层 HP，无法确定时为 -1>
+start_gold=<开局金币，无法确定时为 -1>
+gold_gained=<累计获得金币>
+gold=<当前剩余金币>
+hp=<当前 HP>
+floor=<当前楼层>
+updated_ts=<最后写入 Unix 秒>
 ```
 
-## 5. 在授权前的实现边界
+- 只在第 1 层且 `CardCrawlGame.playtime < 300` 时记录 `floor0_hp`，避免把中途读档的 HP 当成开局 HP。
+- 楼层刷新后，用 `now - playtime` 在 1 小时窗口内寻找最近的 `.tinycat` 重新挂接，避免重复创建。
+- `Run` 加载历史时，用 `updated_ts` 与 `.run` 结束时间匹配（6 小时窗口，要求 `start_ts <= 结束时间`）。
+- 没有状态文件时回退到原有估算，并保留 `goldEstimated` / `floor0HPEstimated` 标记。
 
-- 不新增对 StateNotes 的编译依赖。
-- 不复制 `savestate` 包。
-- 不在导出包中包含 StateNotes 的 jar/代码。
-- 最多只在文档/README 中说明“可选安装 StateNotes 后可获得更精确数据”，不自动读取。
+## 4. 金币估算准确度
+
+在 1,113 局真实数据中，305 局可从分数明细（“下钱雨啦”“好多好多钱”等）提取精确累计金币，作为真值校验估算法：
+
+| 指标 | 数值 |
+|---|---|
+| 平均绝对误差 | 38.0 |
+| 中位绝对误差 | 39 |
+| P90 绝对误差 | 64 |
+| 最大绝对误差 | 160 |
+| 带符号平均误差 | -2.5 |
+
+估算器系统偏差很小，但单局误差可达 160，因此新对局应优先使用 `.tinycat` 的精确值。
+
+验证脚本：`python scripts/validate_gold_estimate.py`。
+
+## 5. 分发边界
+
+- TinyCat 不新增任何 StateNotes/STSStateSaver 编译依赖。
+- 不复制 `savestate` 包，不在导出包中包含其 JAR 或代码。
+- `.tinycat` 是 TinyCat 自己生成的纯文本文件，不包含第三方代码。
