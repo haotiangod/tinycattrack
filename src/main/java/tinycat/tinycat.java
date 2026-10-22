@@ -89,7 +89,7 @@ public class tinycat implements PostInitializeSubscriber, PostDungeonInitializeS
             settingsPanel.addUIElement(debugButton);
         }
 
-        BaseMod.registerModBadge(ImageMaster.loadImage("tinycat/img/nob-32.png"), "Tiny Cat", "vmService", "Local run statistics tracking", settingsPanel);
+        BaseMod.registerModBadge(ImageMaster.loadImage("tinycat/img/nob-32.png"), "Tiny Cat", "tinycat", "Local run statistics tracking", settingsPanel);
     }
 
     /**

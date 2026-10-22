@@ -31,6 +31,10 @@ public class LocalizationKeys {
     public static final String UI_SHOP_ACTIONS = "ui.shop_actions";
     public static final String UI_CAMPFIRE_UPGRADE_RATE = "ui.campfire_upgrade_rate";
     public static final String UI_META_SCALING = "ui.meta_scaling";
+    public static final String UI_EXPORT_TIER_LIST = "ui.export_tier_list";
+    public static final String UI_EXPORTING_TIER_LIST = "ui.exporting_tier_list";
+    public static final String UI_EXPORT_DONE = "ui.export_done";
+    public static final String UI_EXPORT_FAILED = "ui.export_failed";
     
     // 角色
     public static final String UI_ALL = "ui.all";

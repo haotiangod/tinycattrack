@@ -25,6 +25,7 @@ replay_pid*
 # build.gradle.kts 纳入版本库（含本机路径配置，后续阶段会改）
 build
 .gradle
+.gradle-home/
 .workbuddy/
 # 上游 sts-stat-tracker 整项目副本（冗余，整理阶段将移出仓库）
 resource/sts-stat-tracker-master/

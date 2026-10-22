@@ -81,7 +81,11 @@
         "include_abandons": "包含放弃？",
         "min_sample_size": "最小样本量",
         "yes": "是",
-        "no": "否"
+        "no": "否",
+        "export_tier_list": "导出抓率梯度",
+        "exporting_tier_list": "导出中...",
+        "export_done": "已导出：%s",
+        "export_failed": "导出失败：%s"
     },
     
     "profile_options": {

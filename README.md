@@ -2,6 +2,8 @@
 
 纯本地离线运行数据追踪与统计，不依赖任何外部服务器。
 
+> 基于 [MaT1g3R/sts-stat-tracker](https://github.com/MaT1g3R/sts-stat-tracker)（MPL-2.0）修改。
+
 ---
 
 ## 基本信息
@@ -10,7 +12,7 @@
 |------|------|
 | ModID | `TinyCat` |
 | 版本 | 4.0.9 |
-| 作者 | tinyCat |
+| 作者 | tinycat |
 | 依赖 | BaseMod, RunHistoryPlus |
 | 许可证 | MPL-2.0 |
 
@@ -88,6 +90,7 @@ tinycat/
 - **火堆行动统计**：各行动类型统计（升级按卡牌明细，其他按类型）
 - **商店行动统计**：购买卡牌、遗物、药水、删牌等明细
 - **伤害统计**：平均承受伤害、实际 HP 损失（含/不含治疗）
+- **Tier List 导出**：统计屏右上角一键导出 CSV + JSON + HTML + 卡图/遗物图（全部取自本地游戏，不依赖外部图源）
 
 ### 3. 数据筛选
 - 按日期范围筛选
@@ -269,6 +272,7 @@ StatsScreenPatch → MoreStatsScreen → CharStatRenderer
 ## 更新日志
 
 ### v4.0.9 (当前)
+- 新增 Tier List 导出（CSV + JSON + HTML + 卡图/遗物图，全部取自本地游戏）
 - 修复删牌统计逻辑，完善 `PurgeSource` 分类
 - 新增问号节点与事件统计
 - 新增火堆行动统计（升级明细 + 行动类型）

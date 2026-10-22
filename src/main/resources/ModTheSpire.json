@@ -2,10 +2,10 @@
   "modid": "TinyCat",
   "name": "Tiny Cat",
   "author_list": [
-    "vmService"
+    "tinycat"
   ],
   "description": "Local run statistics tracking - Pure offline mode",
-  "version": "4.0.11",
+  "version": "4.0.9",
   "sts_version": "07-30-2020",
   "mts_version": "3.15.0",
   "dependencies": [

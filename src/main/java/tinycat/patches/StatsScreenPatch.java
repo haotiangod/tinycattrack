@@ -5,6 +5,8 @@ import tinycat.LocalizationKeys;
 import tinycat.NameMapper;
 import tinycat.Utils;
 import tinycat.stats.*;
+import tinycat.tier.TierListExporter;
+import tinycat.tinycat;
 import tinycat.ui.CharStatRenderer;
 import tinycat.ui.MoreStatsScreen;
 import com.badlogic.gdx.graphics.Color;
@@ -13,6 +15,8 @@ import com.evacipated.cardcrawl.modthespire.lib.SpirePatch;
 import com.evacipated.cardcrawl.modthespire.lib.SpireReturn;
 import com.megacrit.cardcrawl.core.Settings;
 import com.megacrit.cardcrawl.helpers.FontHelper;
+import com.megacrit.cardcrawl.helpers.Hitbox;
+import com.megacrit.cardcrawl.helpers.ImageMaster;
 import com.megacrit.cardcrawl.screens.mainMenu.ScrollBar;
 import com.megacrit.cardcrawl.screens.stats.AchievementGrid;
 import com.megacrit.cardcrawl.screens.stats.StatsScreen;
@@ -58,7 +62,10 @@ public class StatsScreenPatch {
     @SpirePatch(clz = StatsScreen.class, method = "update")
     public static class UpdatePatch {
         public static void Postfix(StatsScreen __instance) {
-            moreStatsScreen.update();
+            if (moreStatsScreen != null) {
+                moreStatsScreen.update();
+                updateTierListExportButton(__instance);
+            }
         }
     }
 
@@ -88,6 +95,12 @@ public class StatsScreenPatch {
     }
 
     public static MoreStatsScreen moreStatsScreen;
+
+    /** 导出按钮的点击区域；位置每帧跟随统计屏滚动。 */
+    private static Hitbox tierExportHb;
+    private static boolean exportingTierList = false;
+    private static String tierExportStatus = null;
+    private static long tierExportStatusUntil = 0L;
 
     private static float screenPosX(float val) {
         return val * Settings.xScale;
@@ -765,6 +778,121 @@ public class StatsScreenPatch {
         return renderY;
     }
 
+    private static void renderTierListExportButton(SpriteBatch sb,
+                                                   float screenX,
+                                                   float dropdownY,
+                                                   float sampleSizeX) {
+        float btnX = sampleSizeX;
+        float btnY = dropdownY - screenPosY(100);
+        float btnW = screenPosX(240);
+        float btnH = screenPosY(44);
+        float line = Math.max(1.0F, 2.0F * Settings.scale);
+
+        boolean hovered = tierExportHb != null && tierExportHb.hovered;
+        if (ImageMaster.WHITE_SQUARE_IMG != null) {
+            sb.setColor(0.0F, 0.0F, 0.0F, 0.5F);
+            sb.draw(ImageMaster.WHITE_SQUARE_IMG, btnX + 2.0F * Settings.scale, btnY - 2.0F * Settings.scale, btnW, btnH);
+            if (hovered) {
+                sb.setColor(0.23F, 0.20F, 0.11F, 1.0F);
+            } else {
+                sb.setColor(0.11F, 0.12F, 0.15F, 0.96F);
+            }
+            sb.draw(ImageMaster.WHITE_SQUARE_IMG, btnX, btnY, btnW, btnH);
+            sb.setColor(0.84F, 0.68F, 0.30F, 1.0F);
+            sb.draw(ImageMaster.WHITE_SQUARE_IMG, btnX, btnY, btnW, line);
+            sb.draw(ImageMaster.WHITE_SQUARE_IMG, btnX, btnY + btnH - line, btnW, line);
+            sb.draw(ImageMaster.WHITE_SQUARE_IMG, btnX, btnY, line, btnH);
+            sb.draw(ImageMaster.WHITE_SQUARE_IMG, btnX + btnW - line, btnY, line, btnH);
+            sb.setColor(Color.WHITE);
+        }
+
+        String text = exportingTierList
+                ? Localization.get(LocalizationKeys.UI_EXPORTING_TIER_LIST)
+                : Localization.get(LocalizationKeys.UI_EXPORT_TIER_LIST);
+        FontHelper.renderFontCentered(sb,
+                FontHelper.tipBodyFont,
+                text,
+                btnX + btnW / 2.0F,
+                btnY + btnH / 2.0F,
+                Settings.CREAM_COLOR);
+
+        if (tierExportStatus != null && System.currentTimeMillis() < tierExportStatusUntil) {
+            FontHelper.renderSmartText(sb,
+                    FontHelper.tipBodyFont,
+                    tierExportStatus,
+                    btnX + btnW + screenPosX(12),
+                    btnY + btnH - screenPosY(6),
+                    screenPosX(520),
+                    22.0F * Settings.scale,
+                    Settings.CREAM_COLOR);
+        }
+    }
+
+    private static void updateTierListExportButton(StatsScreen s) {
+        if (moreStatsScreen == null || moreStatsScreen.statTypeDropdown == null) {
+            return;
+        }
+        float screenX = Utils.getField(s, StatsScreen.class, "screenX");
+        float scrollY = Utils.getField(s, StatsScreen.class, "scrollY");
+        float labelY = scrollY + screenPosY(950);
+        float dropdownY = labelY - screenPosY(40);
+        float sampleSizeX = screenX + screenPosX(955);
+        float btnX = sampleSizeX;
+        float btnY = dropdownY - screenPosY(100);
+        float btnW = screenPosX(240);
+        float btnH = screenPosY(44);
+
+        if (tierExportHb == null) {
+            tierExportHb = new Hitbox(btnX, btnY, btnW, btnH);
+        }
+        tierExportHb.width = btnW;
+        tierExportHb.height = btnH;
+
+        if (isAnyDropdownOpen()) {
+            tierExportHb.unhover();
+            tierExportHb.clicked = false;
+            return;
+        }
+        tierExportHb.update(btnX, btnY);
+        if (tierExportHb.clicked) {
+            tierExportHb.clicked = false;
+            startTierListExport();
+        }
+    }
+
+    private static boolean isAnyDropdownOpen() {
+        if (moreStatsScreen == null) {
+            return false;
+        }
+        return (moreStatsScreen.startDateDropdown != null && moreStatsScreen.startDateDropdown.isOpen)
+                || (moreStatsScreen.endDateDropDown != null && moreStatsScreen.endDateDropDown.isOpen)
+                || (moreStatsScreen.classDropdown != null && moreStatsScreen.classDropdown.isOpen)
+                || (moreStatsScreen.statTypeDropdown != null && moreStatsScreen.statTypeDropdown.isOpen)
+                || (moreStatsScreen.abandonDropdown != null && moreStatsScreen.abandonDropdown.isOpen)
+                || (moreStatsScreen.sampleSizeDropdown != null && moreStatsScreen.sampleSizeDropdown.isOpen);
+    }
+
+    private static void startTierListExport() {
+        if (exportingTierList) {
+            return;
+        }
+        exportingTierList = true;
+        tierExportStatus = Localization.get(LocalizationKeys.UI_EXPORTING_TIER_LIST);
+        tierExportStatusUntil = Long.MAX_VALUE;
+        try {
+            String path = TierListExporter.export(moreStatsScreen);
+            tierExportStatus = Localization.get(LocalizationKeys.UI_EXPORT_DONE, path);
+            tinycat.logger.info("TierList export finished: " + path);
+        } catch (Exception t) {
+            String message = t.getMessage() == null ? t.toString() : t.getMessage();
+            tierExportStatus = Localization.get(LocalizationKeys.UI_EXPORT_FAILED, message);
+            tinycat.logger.error("TierList export failed", t);
+        } finally {
+            exportingTierList = false;
+            tierExportStatusUntil = System.currentTimeMillis() + 20000L;
+        }
+    }
+
     public static void renderStatScreen(StatsScreen s, SpriteBatch sb) {
         float screenX = Utils.getField(s, StatsScreen.class, "screenX");
         float scrollY = Utils.getField(s, StatsScreen.class, "scrollY");
@@ -852,6 +980,8 @@ public class StatsScreenPatch {
                     labelY,
                     Settings.CREAM_COLOR);
         }
+
+        renderTierListExportButton(sb, screenX, dropdownY, sampleSizeX);
 
         moreStatsScreen.startDateDropdown.render(sb, startDateX, dropdownY);
         moreStatsScreen.endDateDropDown.render(sb, endDateX, dropdownY);
