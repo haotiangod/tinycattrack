@@ -1,6 +1,6 @@
 # TinyCat 数据流与统计口径
 
-> 描述当前 4.1.1 的实际逻辑，便于核对统计结果。
+> 描述当前 4.1.2 的实际逻辑，便于核对统计结果。
 > 代码位置以 `src/main/java/tinycat/` 为准；测试 Mod 在 `tracker-test/`。
 
 ## 1. 从游戏到统计界面
@@ -131,7 +131,7 @@ actualHPLoss = hpBefore - hpAfter
 
 - 正数掉血，负数回血，保留负值。
 - `damage` 是战斗内伤害，`actualHPLoss` 是净变化。
-- 第 1 层 HP 不可靠时在 UI/CSV 标注估算。
+- 第 1 层 HP 不可靠时在 CSV 保留估算计数，界面不再显示该提示。
 
 ### ClassStat
 

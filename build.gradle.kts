@@ -40,7 +40,7 @@ var stsJar: String = "$stsInstallLocation/desktop-1.0.jar"
 var modName: String = rootProject.name
 
 // 自定义版本号，每次测试时修改此处
-var versionTag: String = "V4.1.1"
+var versionTag: String = "V4.1.2"
 
 // JAR 文件命名：使用 ModTheSpire.json 中的 modid
 var jarBaseName: String = "TinyCat"
@@ -94,7 +94,7 @@ tasks.register<Jar>("buildJAR") {
     group = "Slay the Spire"
     description = "Builds a fat (includes runtime dependencies) JAR in the build/libs folder"
 
-    // 设置输出 JAR 文件名：TinyCat_V4.1.1.jar
+    // 设置输出 JAR 文件名：TinyCat_V4.1.2.jar
     archiveFileName.set("${jarBaseName}_${versionTag}.jar")
 
     // Main code

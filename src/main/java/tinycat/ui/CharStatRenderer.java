@@ -57,10 +57,6 @@ public class CharStatRenderer {
             }
         }
 
-        if (cs.floor0HPEstimatedRuns > 0) {
-            this.info += Localization.get(LocalizationKeys.FLOOR1_HP_LOSS_ESTIMATED) + " NL ";
-        }
-
         this.info2 = CharStat.TEXT[17] + cs.numVictory + " NL ";
         this.info2 = this.info2 + CharStat.TEXT[18] + cs.numDeath + " NL ";
         this.info2 = this.info2 + CharStat.TEXT[19] + cs.totalFloorsClimbed + " NL ";

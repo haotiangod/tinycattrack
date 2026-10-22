@@ -11,7 +11,7 @@
 | 项目 | 内容 |
 |------|------|
 | ModID | `TinyCat` |
-| 版本 | 4.1.1 |
+| 版本 | 4.1.2 |
 | 作者 | tinycat |
 | 依赖 | BaseMod, RunHistoryPlus |
 | 许可证 | MPL-2.0 |
@@ -99,7 +99,7 @@ tinycat/
 
 ## 第 0 层 HP 与金币追踪（可选测试版）
 
-主 TinyCat 4.1.1 **不写任何状态文件**，只在对局目录发现 `.tinycat` 时读取；没有就回退估算。这样普通安装不会在后台产生额外文件，也不会与其它 Mod 争抢写入。
+主 TinyCat 4.1.2 **不写任何状态文件**，只在对局目录发现 `.tinycat` 时读取；没有就回退估算。这样普通安装不会在后台产生额外文件，也不会与其它 Mod 争抢写入。
 
 精确值由独立的测试 Mod `TinyCatTrackerTest` 生成，写入 `runs/{runDir}/{start_ts}.tinycat`（key=value）：
 
@@ -122,7 +122,7 @@ updated_ts=...
 - 没有状态文件的历史局回退到估算：
   - 第 1 层 HP：Ironclad `floor1HP + floor1Damage - 6`，其他角色 `+0`。
   - 累计金币：`gold_per_floor` 正增量 + Neow 扣除修正 + MawBank。
-  - UI/CSV 会标注估算。
+  - 金币在 UI/CSV 标注估算；第 1 层 HP 仅在 CSV 保留估算计数，界面不再显示提示。
 - 测试 Mod 与主 Mod 的 modid 不同，可以同时安装；不装测试 Mod 时，主 Mod 的行为与普通统计完全一致。
 
 ### 测试 Mod 的构建与使用
@@ -131,7 +131,7 @@ updated_ts=...
 gradle buildTrackerTestJAR
 ```
 
-产物 `build/libs/TinyCatTrackerTest_V0.1.0.jar`。把它和 `TinyCat_V4.1.1.jar` 一起放入 `mods/`，打几局后运行校验脚本，即可对照状态文件与分数明细。测试 Mod 只写状态，不参与统计界面渲染。
+产物 `build/libs/TinyCatTrackerTest_V0.1.0.jar`。把它和 `TinyCat_V4.1.2.jar` 一起放入 `mods/`，打几局后运行校验脚本，即可对照状态文件与分数明细。测试 Mod 只写状态，不参与统计界面渲染。
 
 ### 金币估算准确度
 
@@ -191,7 +191,7 @@ gradle buildTrackerTestJAR
 ```
 
 产物：
-- 主 Mod：`build/libs/TinyCat_V4.1.1.jar`
+- 主 Mod：`build/libs/TinyCat_V4.1.2.jar`
 - 测试 Mod：`build/libs/TinyCatTrackerTest_V0.1.0.jar`
 
 ### 安装
@@ -216,7 +216,7 @@ python scripts/validate_gold_estimate.py
 
 ## 已知限制
 
-1. 主 Mod 不生成 `.tinycat`；未安装 `TinyCatTrackerTest` 的对局仍使用估算金币与估算第 1 层 HP，UI/CSV 会标注。
+1. 主 Mod 不生成 `.tinycat`；未安装 `TinyCatTrackerTest` 的对局仍使用估算金币与估算第 1 层 HP。金币在 UI/CSV 标注估算，第 1 层 HP 仅在 CSV 保留估算计数。
 2. 安装测试 Mod 后，状态文件依赖时间匹配：若在结算界面停留超过 6 小时，可能匹配失败。
 3. 测试 Mod 只在第 1 层、游戏时间 300 秒内记录 `floor0_hp`；中途读入旧档无法还原开局 HP。
 4. Mod 内容仅通过名称是否含 `:` 判断，可能漏判。
@@ -228,6 +228,9 @@ python scripts/validate_gold_estimate.py
 ---
 
 ## 更新日志
+
+### v4.1.2
+- 移除统计界面的“第1层战损：估算”提示；历史局几乎全部为估算，该提示没有统计意义。CSV 中仍保留估算局计数。
 
 ### v4.1.1
 - 主 Mod 移除 `RunStateTracker` 与帧更新写入；金币/首层 HP 状态改由独立测试 Mod `TinyCatTrackerTest`（`tracker-test/`）生成，主 Mod 仅在发现 `.tinycat` 时只读。

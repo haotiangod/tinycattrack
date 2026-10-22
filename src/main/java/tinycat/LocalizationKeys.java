@@ -113,6 +113,5 @@ public class LocalizationKeys {
     public static final String AVG_SCORE = "stat.avg_score";
     public static final String AVG_GOLD = "stat.avg_gold";  // 平均累计金币（估算）
     public static final String AVG_GOLD_ESTIMATED = "stat.avg_gold_estimated";
-    public static final String FLOOR1_HP_LOSS_ESTIMATED = "stat.floor1_hp_loss_estimated";
     public static final String PURGE_SOURCES = "stat.purge_sources";
 }

@@ -26,7 +26,7 @@ StateNotes 的逐回合快照只能看到“当前金币”，无法单独还原
 
 原计划中的“联系上游作者”“无许可证时绕过 save 类 Mod”均不再需要。
 
-## 3. 实现（4.1.1：主 Mod 只读，测试 Mod 写入）
+## 3. 实现（4.1.2：主 Mod 只读，测试 Mod 写入）
 
 主 TinyCat 不订阅 `PostDungeonUpdate`、不写任何状态文件；精确状态由独立的 `TinyCatTrackerTest` 测试 Mod 生成。测试 Mod 实现 `PostDungeonUpdateSubscriber`，每帧检查，仅在楼层或 `goldGained` 变化时写文件：
 
