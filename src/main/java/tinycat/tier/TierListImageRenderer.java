@@ -111,6 +111,7 @@ public final class TierListImageRenderer {
         g.drawString("对局 / Runs: " + model.runCount
                 + "    最小样本 / Min sample: " + model.minSample
                 + "    放弃局 / Abandons: " + (model.includeAbandons ? "包含" : "排除")
+                + "    种子局 / Seeds: " + model.seedFilter.labelZh
                 + "    生成 / Generated: " + model.generatedAt, PAD, y);
 
         y += 22;

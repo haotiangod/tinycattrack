@@ -109,7 +109,10 @@ public final class TierListExporter {
 
     private static String folderName(TierListModel model) {
         String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
-        String character = model.characterId == null ? "UNKNOWN" : model.characterId;
+        String character = model.isAggregate() ? "ALL_CHARACTERS" : model.characterId;
+        if (character == null) {
+            character = "UNKNOWN";
+        }
         String scope = model.scope == null ? "all" : model.scope.key;
         return "TinyCat_TierList_" + character + "_" + scope + "_" + timestamp;
     }
@@ -118,9 +121,15 @@ public final class TierListExporter {
         Writer writer = new OutputStreamWriter(new FileOutputStream(file), StandardCharsets.UTF_8);
         try {
             writer.write('\uFEFF');
-            writer.write("group,type,id,name_en,name_zh,offered,picked,pick_rate_pct,tier,image\n");
+            writer.write("character_id,character_kind,seed_filter,group,type,id,name_en,name_zh,offered,picked,pick_rate_pct,tier,image\n");
             for (TierListGroup group : model.groups) {
                 for (TierEntry entry : group.entries) {
+                    writer.write(csv(model.characterId));
+                    writer.write(',');
+                    writer.write(csv(model.characterKind()));
+                    writer.write(',');
+                    writer.write(csv(model.seedFilter.key));
+                    writer.write(',');
                     writer.write(csv(group.key));
                     writer.write(',');
                     writer.write(csv(entry.type));
@@ -150,17 +159,20 @@ public final class TierListExporter {
 
     private static void writeJson(TierListModel model, File file) throws IOException {
         Map<String, Object> root = new LinkedHashMap<String, Object>();
-        root.put("schema_version", 1);
+        root.put("schema_version", 2);
         root.put("generated_at", model.generatedAt);
         root.put("mod", "TinyCat");
         root.put("mod_version", MOD_VERSION);
 
         Map<String, Object> character = new LinkedHashMap<String, Object>();
         character.put("id", model.characterId);
+        character.put("kind", model.characterKind());
+        character.put("count", model.characterCount());
         character.put("name_en", model.characterEn);
         character.put("name_zh", model.characterZh);
         character.put("rotate", model.rotate);
         root.put("character", character);
+        root.put("character_count", model.characterCount());
 
         Map<String, Object> scope = new LinkedHashMap<String, Object>();
         scope.put("key", model.scope == null ? "all" : model.scope.key);
@@ -175,6 +187,7 @@ public final class TierListExporter {
 
         Map<String, Object> filters = new LinkedHashMap<String, Object>();
         filters.put("include_abandons", model.includeAbandons);
+        filters.put("seed_filter", model.seedFilter.key);
         filters.put("min_sample", model.minSample);
         filters.put("a20_only", true);
         filters.put("current_save_slot_only", true);
@@ -279,21 +292,30 @@ public final class TierListExporter {
         html.append("<p class=\"sub\">Slay the Spire · local run history export / 杀戮尖塔本地对局历史导出</p>\n");
         html.append("<div class=\"chips\">\n");
         html.append(chip("Character / 角色", model.characterZh + " / " + model.characterEn));
+        html.append(chip("Character type / 类型", model.isAggregate()
+                ? "Aggregate of 4 characters / 4 角色汇总"
+                : "Single character / 单角色"));
         html.append(chip("Scope / 范围", (model.scope == null ? "全部抓率" : model.scope.labelZh) + " / "
                 + (model.scope == null ? "All pick rates" : model.scope.labelEn)));
         html.append(chip("Date / 日期", empty(model.startDate) + " ~ " + empty(model.endDate)));
         html.append(chip("Runs / 对局", Integer.toString(model.runCount)));
         html.append(chip("Min sample / 最小样本", Integer.toString(model.minSample)));
         html.append(chip("Abandons / 放弃局", model.includeAbandons ? "Included / 包含" : "Excluded / 排除"));
+        html.append(chip("Seeds / 种子局", model.seedFilter.labelEn + " / " + model.seedFilter.labelZh));
         html.append(chip("Generated / 生成时间", model.generatedAt));
         html.append("</div>\n");
         html.append("<div class=\"note\">\n");
         html.append("<b>Method / 口径：</b> pick rate = <b>picked / offered</b> (被选取次数 / 被提供次数). ");
         html.append("Act split follows the existing TinyCat aggregation: floors &lt; 17 = Act 1, floors &gt;= 17 = after Act 1. ");
-        html.append("Only A20, non-seeded, non-daily, non-special runs from the current save slot are included (same filter as the in-game stats). ");
+        html.append("Only A20, non-daily, non-special runs from the current save slot are included (same filter as the in-game stats). ");
+        html.append("Seed filter: <b>").append(escapeHtml(model.seedFilter.labelEn)).append("</b>. ");
+        html.append("CSV rows include character_id, character_kind and seed_filter. There are 4 base characters; ALL is an aggregate, not a fifth character. ");
         html.append("SKIP is kept as a real entry; Singing Bowl is merged into SKIP. CURSE/STATUS cards are excluded.<br>\n");
         html.append("<b>口径：</b>抓率 = 被选取次数 ÷ 被提供次数；第一幕/第一幕后沿用现有聚合（floor &lt; 17 为第一幕，floor &gt;= 17 为第一幕后）。");
-        html.append("只统计当前存档位的 A20、非种子、非每日/特殊局（与游戏内统计一致）。SKIP 保留，颂钵并入 SKIP；CURSE/STATUS 卡剔除。<br>\n");
+        html.append("只统计当前存档位的 A20、非每日/特殊局（与游戏内统计一致），种子局筛选：<b>")
+                .append(escapeHtml(model.seedFilter.labelZh)).append("</b>。");
+        html.append("CSV 每行带 character_id、character_kind、seed_filter；基础角色 4 个，ALL 是汇总而非第 5 个角色。");
+        html.append("SKIP 保留，颂钵并入 SKIP；CURSE/STATUS 卡剔除。<br>\n");
         html.append("<b>Images / 图片：</b> all images are extracted from the local game at runtime (CardLibrary / RelicLibrary); SKIP and missing images use a locally generated placeholder. No network or external image source. ");
         html.append("图片全部来自本地游戏内存（CardLibrary / RelicLibrary），SKIP 和缺失图使用本地生成的占位图；不访问网络、不依赖外部图源。\n");
         html.append("</div>\n");
@@ -366,16 +388,20 @@ public final class TierListExporter {
         text.append("Mod version : TinyCat ").append(MOD_VERSION).append("\n");
         text.append("Generated   : ").append(model.generatedAt).append("\n");
         text.append("Character   : ").append(model.characterZh).append(" / ").append(model.characterEn).append("\n");
+        text.append("Type        : ").append(model.isAggregate()
+                ? "aggregate of 4 characters（4 角色汇总）" : "single character（单角色）").append("\n");
         text.append("Scope       : ").append(model.scope == null ? "全部抓率" : model.scope.labelZh)
                 .append(" / ").append(model.scope == null ? "All pick rates" : model.scope.labelEn).append("\n");
         text.append("Date range  : ").append(empty(model.startDate)).append(" ~ ").append(empty(model.endDate)).append("\n");
         text.append("Runs        : ").append(model.runCount).append("\n");
         text.append("Min sample  : ").append(model.minSample).append("\n");
-        text.append("Abandons    : ").append(model.includeAbandons ? "included" : "excluded").append("\n\n");
+        text.append("Abandons    : ").append(model.includeAbandons ? "included" : "excluded").append("\n");
+        text.append("Seed filter : ").append(model.seedFilter.labelEn)
+                .append(" / ").append(model.seedFilter.labelZh).append("\n\n");
 
         text.append("Files\n");
         text.append("-----\n");
-        text.append("data.csv      - one row per entry, UTF-8 with BOM (Excel friendly)\n");
+        text.append("data.csv      - one row per entry, UTF-8 with BOM (Excel friendly); includes character_id/character_kind/seed_filter columns\n");
         text.append("data.json     - structured data with tier/group metadata\n");
         text.append("summary.csv   - character/filter/basic stats + estimation flags\n");
         text.append("all_stats.csv - long-form CSV for every TinyCat statistic dimension\n");
@@ -388,10 +414,15 @@ public final class TierListExporter {
         text.append("Data source / 数据来源\n");
         text.append("----------------------\n");
         text.append("Local .run files loaded by RunHistoryManager and aggregated by ClassStat.\n");
-        text.append("Only A20, non-seeded, non-daily, non-special runs from the current save slot are included.\n");
+        text.append("Only A20, non-daily, non-special runs from the current save slot are included.\n");
+        text.append("Seed filter: ").append(model.seedFilter.labelEn).append(" / ")
+                .append(model.seedFilter.labelZh).append(".\n");
+        text.append("Character count: 4 base-game characters; ALL is an aggregate, not a fifth character.\n");
         text.append("This is the same filter used by the in-game statistics screen.\n");
         text.append("数据来自本地 .run 文件，经 RunHistoryManager 加载、ClassStat 聚合；\n");
-        text.append("只统计当前存档位的 A20、非种子、非每日/特殊局，与游戏内统计口径一致。\n\n");
+        text.append("只统计当前存档位的 A20、非每日/特殊局；种子局筛选：")
+                .append(model.seedFilter.labelZh).append("，与游戏内统计口径一致。\n");
+        text.append("基础角色共 4 个；ALL 是四个角色的汇总，不是第 5 个角色。\n\n");
 
         text.append("Tier rules / 分档\n");
         text.append("-----------------\n");

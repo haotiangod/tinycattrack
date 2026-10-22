@@ -5,6 +5,7 @@ import tinycat.LocalizationKeys;
 import tinycat.tinycat;
 import tinycat.YearMonth;
 import tinycat.stats.ClassStat;
+import tinycat.stats.SeedFilter;
 import com.megacrit.cardcrawl.core.Settings;
 import com.megacrit.cardcrawl.helpers.FontHelper;
 import com.megacrit.cardcrawl.screens.options.DropdownMenu;
@@ -20,6 +21,7 @@ public class MoreStatsScreen implements DropdownMenuListener {
     public DropdownMenu classDropdown;
     public DropdownMenu statTypeDropdown;
     public DropdownMenu abandonDropdown;
+    public DropdownMenu seedFilterDropdown;
     public DropdownMenu sampleSizeDropdown;
     public ArrayList<YearMonth> startDates;
     public ArrayList<YearMonth> endDates;
@@ -28,6 +30,7 @@ public class MoreStatsScreen implements DropdownMenuListener {
     // 使用懒加载，在第一次使用时才获取本地化文本
     private String[] classes;
     private String[] statTypes;
+    private String[] seedFilters;
     
     public String[] getClasses() {
         if (classes == null) {
@@ -66,8 +69,24 @@ public class MoreStatsScreen implements DropdownMenuListener {
         return statTypes;
     }
 
-    public String currentClass() {
-        return getClasses()[classDropdown.getSelectedIndex()];
+    public String[] getSeedFilters() {
+        if (seedFilters == null) {
+            seedFilters = new String[]{
+                    Localization.get(LocalizationKeys.UI_SEED_FILTER_ALL),
+                    Localization.get(LocalizationKeys.UI_SEED_FILTER_EXCLUDE),
+                    Localization.get(LocalizationKeys.UI_SEED_FILTER_ONLY)
+            };
+        }
+        return seedFilters;
+    }
+
+    public SeedFilter currentSeedFilter() {
+        int index = seedFilterDropdown == null ? 0 : seedFilterDropdown.getSelectedIndex();
+        SeedFilter[] values = SeedFilter.values();
+        if (index < 0 || index >= values.length) {
+            return SeedFilter.ALL;
+        }
+        return values[index];
     }
 
     public ClassStat getClassStat() {
@@ -88,8 +107,9 @@ public class MoreStatsScreen implements DropdownMenuListener {
 
         setClassStats(startDates.get(startDateIndex),
                 endDates.get(endDateIndex),
-                currentClass(),
-                abandonDropdown.getSelectedIndex() == 0);
+                classDropdown.getSelectedIndex(),
+                abandonDropdown.getSelectedIndex() == 0,
+                currentSeedFilter());
     }
 
     public void update() {
@@ -98,6 +118,7 @@ public class MoreStatsScreen implements DropdownMenuListener {
         classDropdown.update();
         statTypeDropdown.update();
         abandonDropdown.update();
+        seedFilterDropdown.update();
         sampleSizeDropdown.update();
     }
 
@@ -130,6 +151,10 @@ public class MoreStatsScreen implements DropdownMenuListener {
         abandonDropdown =
                 new DropdownMenu(this, new String[]{Localization.get(LocalizationKeys.UI_YES), Localization.get(LocalizationKeys.UI_NO)}, FontHelper.tipBodyFont, Settings.LIGHT_YELLOW_COLOR);
 
+        seedFilterDropdown =
+                new DropdownMenu(this, getSeedFilters(), FontHelper.tipBodyFont, Settings.LIGHT_YELLOW_COLOR);
+        seedFilterDropdown.setSelectedIndex(0);
+
         sampleSizeDropdown =
                 new DropdownMenu(this,
                         new String[]{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"},
@@ -138,55 +163,64 @@ public class MoreStatsScreen implements DropdownMenuListener {
 
         setClassStats(startDates.get(startDateDropdown.getSelectedIndex()),
                 endDates.get(endDateDropDown.getSelectedIndex()),
-                getClasses()[classDropdown.getSelectedIndex()], abandonDropdown.getSelectedIndex() == 0);
+                classDropdown.getSelectedIndex(), abandonDropdown.getSelectedIndex() == 0,
+                currentSeedFilter());
     }
 
     public boolean isDropDownOpen() {
-        return startDateDropdown.isOpen || endDateDropDown.isOpen || classDropdown.isOpen;
+        return startDateDropdown.isOpen || endDateDropDown.isOpen || classDropdown.isOpen
+                || seedFilterDropdown.isOpen;
     }
 
     private static ClassStat[] getClassStats(YearMonth startDate,
                                              YearMonth endDate,
-                                             String className,
-                                             boolean includeAbandons) {
+                                             int classIndex,
+                                             boolean includeAbandons,
+                                             SeedFilter seedFilter) {
         ClassStat
                 ironcladCS =
-                new ClassStat(tinycat.runHistoryManager.getIroncladRuns(startDate, endDate, includeAbandons),
-                        false);
+                new ClassStat(tinycat.runHistoryManager.getIroncladRuns(startDate, endDate, includeAbandons,
+                        seedFilter), false);
         ClassStat
                 silentCS =
-                new ClassStat(tinycat.runHistoryManager.getSilentRuns(startDate, endDate, includeAbandons), false);
+                new ClassStat(tinycat.runHistoryManager.getSilentRuns(startDate, endDate, includeAbandons,
+                        seedFilter), false);
         ClassStat
                 defectCS =
-                new ClassStat(tinycat.runHistoryManager.getDefectRuns(startDate, endDate, includeAbandons), false);
+                new ClassStat(tinycat.runHistoryManager.getDefectRuns(startDate, endDate, includeAbandons,
+                        seedFilter), false);
         ClassStat
                 watcherCS =
-                new ClassStat(tinycat.runHistoryManager.getWatcherRuns(startDate, endDate, includeAbandons),
-                        false);
+                new ClassStat(tinycat.runHistoryManager.getWatcherRuns(startDate, endDate, includeAbandons,
+                        seedFilter), false);
 
         ClassStat allCS;
-        switch (className) {
-            case "Ironclad":
+        switch (classIndex) {
+            case 1:
                 allCS = ironcladCS;
                 break;
-            case "Silent":
+            case 2:
                 allCS = silentCS;
                 break;
-            case "Defect":
+            case 3:
                 allCS = defectCS;
                 break;
-            case "Watcher":
+            case 4:
                 allCS = watcherCS;
                 break;
             default:
                 allCS =
-                        new ClassStat(tinycat.runHistoryManager.getAllRuns(startDate, endDate, includeAbandons),
-                                true);
+                        new ClassStat(tinycat.runHistoryManager.getAllRuns(startDate, endDate, includeAbandons,
+                                seedFilter), true);
         }
         return new ClassStat[]{ironcladCS, silentCS, defectCS, watcherCS, allCS};
     }
 
-    private void setClassStats(YearMonth startDate, YearMonth endDate, String className, boolean includeAbandons) {
-        classStats = getClassStats(startDate, endDate, className, includeAbandons);
+    private void setClassStats(YearMonth startDate,
+                               YearMonth endDate,
+                               int classIndex,
+                               boolean includeAbandons,
+                               SeedFilter seedFilter) {
+        classStats = getClassStats(startDate, endDate, classIndex, includeAbandons, seedFilter);
     }
 }

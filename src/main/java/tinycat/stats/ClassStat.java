@@ -204,7 +204,7 @@ public class ClassStat {
             put(4, new Mean("事件总计"));
         }};
 
-        // 每幕总战损：单层累加所有 encounter（战斗 + 事件）的 actualHPLoss，独立计算，不依赖分项加和
+        // 每幕总战损（战斗实际 HP 变化 + 事件 damage_taken），按 run 汇总
         Map<Integer, Mean> totalAllHPLossPerAct = new HashMap<Integer, Mean>() {{
             put(1, new Mean("每幕总计"));
             put(2, new Mean("每幕总计"));
@@ -653,6 +653,35 @@ public class ClassStat {
             }
         }
 
+        private void allHPLossStats(Run run) {
+            Map<Integer, Double> runAllHPLossSum = new HashMap<>();
+            for (EncounterStats es : run.encounterStats) {
+                if (es == null || es.enemies == null || es.enemies.startsWith("事件:")) {
+                    continue;
+                }
+                runAllHPLossSum.merge(run.getAct(es.floor), (double) es.actualHPLoss, Double::sum);
+            }
+            if (run.eventStats != null) {
+                for (com.megacrit.cardcrawl.screens.stats.EventStats event : run.eventStats) {
+                    if (event.damage_taken > 0) {
+                        runAllHPLossSum.merge(run.getAct(event.floor), (double) event.damage_taken, Double::sum);
+                    }
+                }
+            }
+            // 每幕总战损按“每局每幕一个样本”统计；没有战损的幕也要记 0，
+            // 否则平均值只会包含发生过战损的对局，结果会偏高。
+            int lastAct = Math.min(4, Math.max(1, run.getAct(Math.max(1, run.floorsReached))));
+            for (int act = 1; act <= lastAct; act++) {
+                runAllHPLossSum.putIfAbsent(act, 0.0D);
+            }
+            for (Map.Entry<Integer, Double> entry : runAllHPLossSum.entrySet()) {
+                Mean total = totalAllHPLossPerAct.get(entry.getKey());
+                if (total != null) {
+                    total.add(entry.getValue());
+                }
+            }
+        }
+
         private void eventStats(Run run) {
             if (run.eventStats == null) return;
             
@@ -1070,6 +1099,7 @@ public class ClassStat {
             relicStats(run);
             runTimeStats(run);
             eventStats(run);
+            allHPLossStats(run);
             purgeStats(run);  // 统计删牌数据
             questionMarkAndEventStats(run);  // 统计问号和事件
             campfireActionStats(run);  // 统计火堆行动

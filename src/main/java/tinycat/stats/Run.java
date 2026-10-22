@@ -35,6 +35,7 @@ public class Run implements Comparable<Run> {
     public final boolean isHeartKill;
     public final boolean isA20;
     public final boolean abandoned;
+    public final boolean seeded;
     public final long timestamp;
     public final String killedBy;
     public final int floorsReached;
@@ -89,6 +90,7 @@ public class Run implements Comparable<Run> {
             }
         }
         this.abandoned = abandoned;
+        this.seeded = runData.chose_seed;
 
         masterDeck = runData.master_deck.stream().map(Card::fromString).collect(Collectors.toList());
         killedBy = EncounterStats.getNameReplacementMap().getOrDefault(runData.killed_by, runData.killed_by);
@@ -312,7 +314,7 @@ public class Run implements Comparable<Run> {
     public boolean valid() {
         boolean
                 valid =
-                !runData.chose_seed && !runData.is_special_run && !runData.is_daily && !runData.is_endless && isA20;
+                !runData.is_special_run && !runData.is_daily && !runData.is_endless && isA20;
         if (!valid) {
             return false;
         }

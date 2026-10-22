@@ -34,10 +34,11 @@
 - 每个文件交给 `Run.fromFile()`。
 - `Run.valid()` 过滤：
   - 必须是 A20；
-  - 不能是自定义种子、每日、特殊局、无尽；
+  - 不能是每日、特殊局、无尽；
   - 不能含 Mod 卡（名称含 `:`）；
   - 命中硬编码黑名单的对局剔除。
-- 按角色放入 Ironclad / Silent / Defect / Watcher / All 五个列表。
+- 种子局保留，由统计面板的种子筛选（全部/不含/仅种子）控制。
+- 按角色放入 Ironclad / Silent / Defect / Watcher 四个角色列表；另有 All 汇总列表，All 不是第五个角色。
 
 ### Run
 
@@ -184,9 +185,11 @@ StatsScreenPatch 当前页面
 
 CSV 文件：
 
-- `data.csv`：Tier List 条目
-- `summary.csv`：角色/筛选/基础统计/估算标记
-- `all_stats.csv`：长表，覆盖所有 ClassStat 维度（卡牌、Neow、Boss 遗物、战斗、事件、遗物、删牌、火堆、商店、Meta 等）
+- `data.csv`：Tier List 条目；每行带 `character_id`、`character_kind`（`character`/`aggregate`）和 `seed_filter`
+- `summary.csv`：角色/筛选/基础统计/估算标记；`character_count=4`，`ALL` 是四角色汇总
+- `all_stats.csv`：长表，覆盖所有 ClassStat 维度（卡牌、Neow、Boss 遗物、战斗、事件、遗物、删牌、火堆、商店、Meta 等），开头带角色/种子筛选上下文
+
+种子筛选会改变抓率样本：同一张卡在包含/排除种子局时可能跨过档位边界；`min_sample` 过小（尤其 0）会让 1/1 这种小样本直接进入 S 档。
 
 ## 8. 金币估算校验
 

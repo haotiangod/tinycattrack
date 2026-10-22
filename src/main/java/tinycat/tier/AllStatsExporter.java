@@ -35,22 +35,27 @@ public final class AllStatsExporter {
     public static void write(MoreStatsScreen screen, TierListModel model, File root) throws IOException {
         ClassStat cs = screen.getClassStat();
         writeSummary(screen, model, cs, new File(root, "summary.csv"));
-        writeAllStats(cs, new File(root, "all_stats.csv"));
+        writeAllStats(cs, model, new File(root, "all_stats.csv"));
     }
 
     private static void writeSummary(MoreStatsScreen screen, TierListModel model, ClassStat cs, File file) throws IOException {
         Writer w = writer(file);
         try {
             w.write("metric,value,note\n");
-            scalar(w, "schema_version", "1", "");
+            scalar(w, "schema_version", "2", "");
             scalar(w, "generated_at", model.generatedAt, "");
             scalar(w, "character_id", model.characterId, "");
+            scalar(w, "character_kind", model.characterKind(),
+                    model.isAggregate() ? "aggregate of all four characters" : "single character");
+            scalar(w, "character_count", String.valueOf(model.characterCount()), "base-game characters");
             scalar(w, "character_en", model.characterEn, "");
             scalar(w, "character_zh", model.characterZh, "");
             scalar(w, "scope", model.scope == null ? "all" : model.scope.key, "");
             scalar(w, "date_start", model.startDate, "");
             scalar(w, "date_end", model.endDate, "");
             scalar(w, "include_abandons", String.valueOf(model.includeAbandons), "");
+            scalar(w, "seed_filter", model.seedFilter.key,
+                    model.seedFilter.labelEn + " / " + model.seedFilter.labelZh);
             scalar(w, "min_sample", String.valueOf(model.minSample), "");
             int runs = cs.numVictory + cs.numDeath;
             scalar(w, "run_count", String.valueOf(runs), "");
@@ -90,10 +95,15 @@ public final class AllStatsExporter {
         }
     }
 
-    private static void writeAllStats(ClassStat cs, File file) throws IOException {
+    private static void writeAllStats(ClassStat cs, TierListModel model, File file) throws IOException {
         Writer w = writer(file);
         try {
             w.write("category,table,act,key,name_en,name_zh,win,loss,total,percent,mean,samples,value,note\n");
+            // 导出上下文：让 all_stats.csv 单独打开时也不会把全角色汇总误认为第 5 个角色
+            scalarRow(w, "summary", "character_id", model.characterId, "");
+            scalarRow(w, "summary", "character_kind", model.characterKind(), "");
+            scalarRow(w, "summary", "character_count", model.characterCount(), "");
+            scalarRow(w, "summary", "seed_filter", model.seedFilter.key, "");
             // 基础
             scalarRow(w, "summary", "run_count", cs.numVictory + cs.numDeath, "");
             scalarRow(w, "summary", "num_victory", cs.numVictory, "");
@@ -139,7 +149,8 @@ public final class AllStatsExporter {
             meanMap(w, "encounter", "average_no_heal_hp_loss", cs.averageNoHealActualHPLoss, "");
             meanMap(w, "encounter", "average_heal_hp_loss", cs.averageHealActualHPLoss, "");
             meanMap(w, "encounter", "average_event_hp_loss", cs.averageEventHPLoss, "");
-            meanMap(w, "encounter", "average_all_hp_loss", cs.averageAllHPLoss, "");
+            meanMap(w, "encounter", "average_all_hp_loss", cs.averageAllHPLoss,
+                    "combat actual HP loss + event damage_taken, one sample per run/act");
             rateMap(w, "encounter", "encounter_mortality_rate", cs.encounterDeadRate, "");
             if (cs.nob != null) {
                 rateRow(w, "encounter", "nob_survival_rate", 0, cs.nob, "");

@@ -1,6 +1,7 @@
 package tinycat;
 
 import tinycat.stats.Run;
+import tinycat.stats.SeedFilter;
 import com.badlogic.gdx.Gdx;
 import com.megacrit.cardcrawl.core.CardCrawlGame;
 
@@ -23,7 +24,7 @@ import java.util.stream.Stream;
  * - allRuns: 全部对局
  * - ironcladRuns / silentRuns / defectRuns / watcherRuns: 按角色分
  * 
- * 支持按日期范围和是否包含放弃对局进行筛选。
+ * 支持按日期范围、是否包含放弃对局以及种子局模式进行筛选。
  */
 public class RunHistoryManager {
     private final List<Run> allRuns = new ArrayList<>();
@@ -40,7 +41,7 @@ public class RunHistoryManager {
      * 2. 对于默认存档位（slot=0），排除带 "0_"/"1_"/"2_" 前缀的目录
      * 3. 对于非默认存档位，只加载匹配前缀的目录
      * 4. 每个子目录下的 .run 文件通过 Run.fromFile() 解析
-     * 5. 过滤无效对局（非A20、自定义种子、每日挑战等）
+     * 5. 过滤无效对局（非A20、每日挑战、特殊局等）；种子局保留，由查询筛选
      * 
      * @return 有效对局数据流
      */
@@ -80,15 +81,19 @@ public class RunHistoryManager {
     }
 
     /**
-     * 按日期范围和是否包含放弃对局进行筛选。
+     * 按日期范围、放弃局和种子局模式进行筛选。
      */
-    private static List<Run> getRunsInRange(List<Run> runs, YearMonth start, YearMonth end, boolean includeAbandons) {
-        return runs.stream().filter(run -> run.isInRange(start, end)).filter(run -> {
-            if (includeAbandons) {
-                return true;
-            }
-            return !run.abandoned;
-        }).collect(Collectors.toList());
+    private static List<Run> getRunsInRange(List<Run> runs,
+                                            YearMonth start,
+                                            YearMonth end,
+                                            boolean includeAbandons,
+                                            SeedFilter seedFilter) {
+        SeedFilter mode = seedFilter == null ? SeedFilter.ALL : seedFilter;
+        return runs.stream()
+                .filter(run -> run.isInRange(start, end))
+                .filter(mode::accepts)
+                .filter(run -> includeAbandons || !run.abandoned)
+                .collect(Collectors.toList());
     }
 
     /**
@@ -101,7 +106,7 @@ public class RunHistoryManager {
             List<YearMonth> dates = getDates().collect(Collectors.toList());
             YearMonth firstRun = dates.get(0);
             YearMonth lastRun = dates.get(dates.size() - 1);
-            return getAllRuns(firstRun, lastRun, true);
+            return getAllRuns(firstRun, lastRun, true, SeedFilter.ALL);
         }
 
         return allRuns.stream().filter(run -> {
@@ -112,24 +117,24 @@ public class RunHistoryManager {
         }).collect(Collectors.toList());
     }
 
-    public List<Run> getAllRuns(YearMonth start, YearMonth end, boolean includeAbandons) {
-        return getRunsInRange(allRuns, start, end, includeAbandons);
+    public List<Run> getAllRuns(YearMonth start, YearMonth end, boolean includeAbandons, SeedFilter seedFilter) {
+        return getRunsInRange(allRuns, start, end, includeAbandons, seedFilter);
     }
 
-    public List<Run> getIroncladRuns(YearMonth start, YearMonth end, boolean includeAbandons) {
-        return getRunsInRange(ironcladRuns, start, end, includeAbandons);
+    public List<Run> getIroncladRuns(YearMonth start, YearMonth end, boolean includeAbandons, SeedFilter seedFilter) {
+        return getRunsInRange(ironcladRuns, start, end, includeAbandons, seedFilter);
     }
 
-    public List<Run> getSilentRuns(YearMonth start, YearMonth end, boolean includeAbandons) {
-        return getRunsInRange(silentRuns, start, end, includeAbandons);
+    public List<Run> getSilentRuns(YearMonth start, YearMonth end, boolean includeAbandons, SeedFilter seedFilter) {
+        return getRunsInRange(silentRuns, start, end, includeAbandons, seedFilter);
     }
 
-    public List<Run> getDefectRuns(YearMonth start, YearMonth end, boolean includeAbandons) {
-        return getRunsInRange(defectRuns, start, end, includeAbandons);
+    public List<Run> getDefectRuns(YearMonth start, YearMonth end, boolean includeAbandons, SeedFilter seedFilter) {
+        return getRunsInRange(defectRuns, start, end, includeAbandons, seedFilter);
     }
 
-    public List<Run> getWatcherRuns(YearMonth start, YearMonth end, boolean includeAbandons) {
-        return getRunsInRange(watcherRuns, start, end, includeAbandons);
+    public List<Run> getWatcherRuns(YearMonth start, YearMonth end, boolean includeAbandons, SeedFilter seedFilter) {
+        return getRunsInRange(watcherRuns, start, end, includeAbandons, seedFilter);
     }
 
 

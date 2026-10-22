@@ -1,5 +1,7 @@
 package tinycat.tier;
 
+import tinycat.stats.SeedFilter;
+
 import java.util.List;
 
 /**
@@ -15,6 +17,7 @@ public class TierListModel {
     public final String startDate;
     public final String endDate;
     public final boolean includeAbandons;
+    public final SeedFilter seedFilter;
     public final int minSample;
     public final int runCount;
     public final TierListScope scope;
@@ -28,6 +31,7 @@ public class TierListModel {
                          String startDate,
                          String endDate,
                          boolean includeAbandons,
+                         SeedFilter seedFilter,
                          int minSample,
                          int runCount,
                          TierListScope scope,
@@ -40,6 +44,7 @@ public class TierListModel {
         this.startDate = startDate;
         this.endDate = endDate;
         this.includeAbandons = includeAbandons;
+        this.seedFilter = seedFilter == null ? SeedFilter.ALL : seedFilter;
         this.minSample = minSample;
         this.runCount = runCount;
         this.scope = scope;
@@ -52,5 +57,17 @@ public class TierListModel {
             total += group.entries.size();
         }
         return total;
+    }
+
+    public boolean isAggregate() {
+        return "ALL".equals(characterId);
+    }
+
+    public String characterKind() {
+        return isAggregate() ? "aggregate" : "character";
+    }
+
+    public int characterCount() {
+        return 4;
     }
 }

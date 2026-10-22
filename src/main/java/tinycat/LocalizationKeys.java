@@ -10,6 +10,10 @@ public class LocalizationKeys {
     public static final String UI_CHARACTER = "ui.character";
     public static final String UI_STAT_TYPE = "ui.stat_type";
     public static final String UI_INCLUDE_ABANDONS = "ui.include_abandons";
+    public static final String UI_SEED_FILTER = "ui.seed_filter";
+    public static final String UI_SEED_FILTER_ALL = "ui.seed_filter_all";
+    public static final String UI_SEED_FILTER_EXCLUDE = "ui.seed_filter_exclude";
+    public static final String UI_SEED_FILTER_ONLY = "ui.seed_filter_only";
     public static final String UI_MIN_SAMPLE_SIZE = "ui.min_sample_size";
     public static final String UI_YES = "ui.yes";
     public static final String UI_NO = "ui.no";

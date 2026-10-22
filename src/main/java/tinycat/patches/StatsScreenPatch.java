@@ -103,6 +103,8 @@ public class StatsScreenPatch {
     private static boolean exportingTierList = false;
     private static String tierExportStatus = null;
     private static long tierExportStatusUntil = 0L;
+    /** 导出按钮相对筛选行下拉框的纵向偏移，给第二行种子筛选留出空间。 */
+    private static final float EXPORT_BUTTON_DROPDOWN_OFFSET = 160.0F;
 
     private static float screenPosX(float val) {
         return val * Settings.xScale;
@@ -790,7 +792,7 @@ public class StatsScreenPatch {
                                                    float dropdownY,
                                                    float sampleSizeX) {
         float btnX = sampleSizeX;
-        float btnY = dropdownY - screenPosY(100);
+        float btnY = dropdownY - screenPosY(EXPORT_BUTTON_DROPDOWN_OFFSET);
         float btnW = screenPosX(240);
         float btnH = screenPosY(44);
         float line = Math.max(1.0F, 2.0F * Settings.scale);
@@ -884,7 +886,7 @@ public class StatsScreenPatch {
         float dropdownY = labelY - screenPosY(40);
         float sampleSizeX = screenX + screenPosX(955);
         float btnX = sampleSizeX;
-        float btnY = dropdownY - screenPosY(100);
+        float btnY = dropdownY - screenPosY(EXPORT_BUTTON_DROPDOWN_OFFSET);
         float btnW = screenPosX(240);
         float btnH = screenPosY(44);
 
@@ -926,6 +928,7 @@ public class StatsScreenPatch {
                 || (moreStatsScreen.classDropdown != null && moreStatsScreen.classDropdown.isOpen)
                 || (moreStatsScreen.statTypeDropdown != null && moreStatsScreen.statTypeDropdown.isOpen)
                 || (moreStatsScreen.abandonDropdown != null && moreStatsScreen.abandonDropdown.isOpen)
+                || (moreStatsScreen.seedFilterDropdown != null && moreStatsScreen.seedFilterDropdown.isOpen)
                 || (moreStatsScreen.sampleSizeDropdown != null && moreStatsScreen.sampleSizeDropdown.isOpen);
     }
 
@@ -1019,6 +1022,8 @@ public class StatsScreenPatch {
         float statTypeX = characterX + screenPosX(xDiff);
         float includeAbandonsX = statTypeX + screenPosX(375);
         float sampleSizeX = includeAbandonsX + screenPosX(xDiff * 2);
+        float seedLabelY = labelY - screenPosY(80);
+        float seedDropdownY = dropdownY - screenPosY(80);
 
         FontHelper.renderSmartText(sb, FontHelper.tipBodyFont, Localization.get(LocalizationKeys.UI_START_DATE), startDateX, labelY, Settings.CREAM_COLOR);
         FontHelper.renderSmartText(sb, FontHelper.tipBodyFont, Localization.get(LocalizationKeys.UI_END_DATE), endDateX, labelY, Settings.CREAM_COLOR);
@@ -1029,6 +1034,12 @@ public class StatsScreenPatch {
                 Localization.get(LocalizationKeys.UI_INCLUDE_ABANDONS),
                 includeAbandonsX,
                 labelY,
+                Settings.CREAM_COLOR);
+        FontHelper.renderSmartText(sb,
+                FontHelper.tipBodyFont,
+                Localization.get(LocalizationKeys.UI_SEED_FILTER),
+                includeAbandonsX,
+                seedLabelY,
                 Settings.CREAM_COLOR);
         if (renderSampleSize) {
             FontHelper.renderSmartText(sb,
@@ -1048,6 +1059,7 @@ public class StatsScreenPatch {
         moreStatsScreen.classDropdown.render(sb, characterX, dropdownY);
         moreStatsScreen.statTypeDropdown.render(sb, statTypeX, dropdownY);
         moreStatsScreen.abandonDropdown.render(sb, includeAbandonsX, dropdownY);
+        moreStatsScreen.seedFilterDropdown.render(sb, includeAbandonsX, seedDropdownY);
         if (renderSampleSize) {
             moreStatsScreen.sampleSizeDropdown.render(sb, sampleSizeX, dropdownY);
         }

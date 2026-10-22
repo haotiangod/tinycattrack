@@ -8,6 +8,7 @@ import tinycat.stats.BossRelic;
 import tinycat.stats.Card;
 import tinycat.stats.ClassStat;
 import tinycat.stats.Rate;
+import tinycat.stats.SeedFilter;
 import tinycat.ui.MoreStatsScreen;
 
 import java.text.SimpleDateFormat;
@@ -28,17 +29,17 @@ import java.util.Map;
  * - Boss 遗物：复用 bossRelicPickRateAct1 / Act2。
  * - SKIP 保留；Singing Bowl（颂钵）并入 SKIP 桶，因为它本质也是“跳过拿牌”。
  * - CURSE / STATUS 卡从卡牌 Tier List 剔除。
- * - 只统计 Run.valid() 已经筛过的 A20、非种子、非每日/特殊局（由 RunHistoryManager 完成）。
+ * - 只统计 Run.valid() 已经滤掉非 A20、每日/特殊局的数据；种子局由当前面板筛选决定。
  */
 public final class TierListBuilder {
     private static final String[] CHARACTER_IDS = {
             "ALL", "IRONCLAD", "THE_SILENT", "DEFECT", "WATCHER"
     };
     private static final String[] CHARACTER_EN = {
-            "All", "Ironclad", "Silent", "Defect", "Watcher"
+            "All characters (aggregate)", "Ironclad", "Silent", "Defect", "Watcher"
     };
     private static final String[] CHARACTER_ZH = {
-            "全部角色", "战士", "猎人", "机器人", "观者"
+            "全角色汇总", "战士", "猎人", "机器人", "观者"
     };
 
     private TierListBuilder() {
@@ -60,9 +61,9 @@ public final class TierListBuilder {
             throw new IllegalStateException("class statistics is not ready");
         }
 
-        int classIndex = screen.classDropdown == null ? 1 : screen.classDropdown.getSelectedIndex();
+        int classIndex = screen.classDropdown == null ? 0 : screen.classDropdown.getSelectedIndex();
         if (classIndex < 0 || classIndex >= CHARACTER_IDS.length) {
-            classIndex = 1;
+            classIndex = 0;
         }
         int minSample = screen.sampleSizeDropdown == null ? 0 : screen.sampleSizeDropdown.getSelectedIndex();
 
@@ -98,6 +99,7 @@ public final class TierListBuilder {
         String startDate = dateAt(screen.startDates, screen.startDateDropdown == null ? 0 : screen.startDateDropdown.getSelectedIndex());
         String endDate = dateAt(screen.endDates, screen.endDateDropDown == null ? 0 : screen.endDateDropDown.getSelectedIndex());
         boolean includeAbandons = screen.abandonDropdown == null || screen.abandonDropdown.getSelectedIndex() == 0;
+        SeedFilter seedFilter = screen.currentSeedFilter();
         int runCount = cs.numVictory + cs.numDeath;
 
         return new TierListModel(generatedAt,
@@ -108,6 +110,7 @@ public final class TierListBuilder {
                 startDate,
                 endDate,
                 includeAbandons,
+                seedFilter,
                 minSample,
                 runCount,
                 scope,
