@@ -519,19 +519,9 @@ public class Run implements Comparable<Run> {
         }
 
         // 优先级2: 伴生文件（往期 tinycat 记录）
-        if (runDir != null && runData.timestamp != null) {
-            try {
-                String companionPath = "runs/" + runDir + "/" + runData.timestamp + ".floor0hp";
-                FileHandle companionFile = Gdx.files.local(companionPath);
-                if (companionFile.exists()) {
-                    String content = companionFile.readString().trim();
-                    int hp = Integer.parseInt(content);
-                    tinycat.logger.debug("Loaded floor0HP from companion file: " + companionPath + " = " + hp);
-                    return hp;
-                }
-            } catch (Exception e) {
-                tinycat.logger.debug("Failed to read companion file: " + e.getMessage());
-            }
+        int companionHP = readCompanionFloor0HP();
+        if (companionHP > 0) {
+            return companionHP;
         }
 
         // 优先级3: 估算法（基于第1层受到伤害反推第0层HP）
@@ -561,6 +551,74 @@ public class Run implements Comparable<Run> {
             return runData.max_hp_per_floor.get(0);
         }
         return 70;
+    }
+
+    /**
+     * 读取 floor0HP 伴生文件。
+     *
+     * tinycat 在开局写入时用的是“开局时间戳”，而 .run 的 timestamp 是“结束时间戳”，
+     * 两者通常不相等，所以不能只按精确文件名找。
+     * 这里先找精确文件名，再在 runDir 下找 timestamp <= 结束时间、且相差不超过 24h 的
+     * 最新一个 .floor0hp 文件，避免历史局永远读不到精确值。
+     */
+    private int readCompanionFloor0HP() {
+        if (runDir == null || runData.timestamp == null) {
+            return -1;
+        }
+        long endTimestamp;
+        try {
+            endTimestamp = Long.parseLong(runData.timestamp);
+        } catch (NumberFormatException e) {
+            return -1;
+        }
+
+        FileHandle exact = Gdx.files.local("runs/" + runDir + "/" + runData.timestamp + ".floor0hp");
+        int exactHP = readFloor0File(exact);
+        if (exactHP > 0) {
+            return exactHP;
+        }
+
+        FileHandle directory = Gdx.files.local("runs/" + runDir + "/");
+        if (!directory.exists() || !directory.isDirectory()) {
+            return -1;
+        }
+
+        FileHandle best = null;
+        long expectedStart = endTimestamp - Math.max(0, runData.playtime);
+        long bestDiff = Long.MAX_VALUE;
+        for (FileHandle file : directory.list()) {
+            String name = file.name();
+            if (!name.endsWith(".floor0hp")) {
+                continue;
+            }
+            try {
+                long timestamp = Long.parseLong(name.substring(0, name.length() - 9));
+                if (timestamp > endTimestamp) {
+                    continue;
+                }
+                long diff = Math.abs(timestamp - expectedStart);
+                if (diff <= 24L * 60L * 60L && diff < bestDiff) {
+                    bestDiff = diff;
+                    best = file;
+                }
+            } catch (NumberFormatException ignored) {
+                // 文件名不是时间戳，跳过
+            }
+        }
+        return best == null ? -1 : readFloor0File(best);
+    }
+
+    private int readFloor0File(FileHandle file) {
+        try {
+            if (file != null && file.exists() && !file.isDirectory()) {
+                int hp = Integer.parseInt(file.readString().trim());
+                tinycat.logger.debug("Loaded floor0HP from companion file: " + file.path() + " = " + hp);
+                return hp;
+            }
+        } catch (Exception e) {
+            tinycat.logger.debug("Failed to read companion file: " + e.getMessage());
+        }
+        return -1;
     }
 
     private int getPotionsCreated() {
