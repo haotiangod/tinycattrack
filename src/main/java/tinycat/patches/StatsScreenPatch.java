@@ -6,6 +6,7 @@ import tinycat.NameMapper;
 import tinycat.Utils;
 import tinycat.stats.*;
 import tinycat.tier.TierListExporter;
+import tinycat.tier.TierListScope;
 import tinycat.tinycat;
 import tinycat.ui.CharStatRenderer;
 import tinycat.ui.MoreStatsScreen;
@@ -111,14 +112,19 @@ public class StatsScreenPatch {
     }
 
     public static String getCharColor() {
-        switch (moreStatsScreen.currentClass()) {
-            case "Ironclad":
+        if (moreStatsScreen == null || moreStatsScreen.classDropdown == null) {
+            return "#y";
+        }
+        // 按下拉索引判断，不能按 currentClass() 的本地化字符串判断，
+        // 否则中文客户端会全部落到 default 的黄色。
+        switch (moreStatsScreen.classDropdown.getSelectedIndex()) {
+            case 1:
                 return "#r";
-            case "Silent":
+            case 2:
                 return "#g";
-            case "Defect":
+            case 3:
                 return "#b";
-            case "Watcher":
+            case 4:
                 return "#p";
             default:
                 return "#y";
@@ -828,10 +834,38 @@ public class StatsScreenPatch {
         }
     }
 
+    private static boolean isTierListPage(int statTypeIndex) {
+        // 1: 第一幕卡牌选取率；2: 第一幕后卡牌选取率；5: BOSS 遗物选取率
+        return statTypeIndex == 1 || statTypeIndex == 2 || statTypeIndex == 5;
+    }
+
+    private static TierListScope scopeForStatType(int statTypeIndex) {
+        switch (statTypeIndex) {
+            case 1:
+                return TierListScope.CARDS_ACT1;
+            case 2:
+                return TierListScope.CARDS_AFTER_ACT1;
+            case 5:
+                return TierListScope.BOSS_RELICS;
+            default:
+                return TierListScope.ALL;
+        }
+    }
+
     private static void updateTierListExportButton(StatsScreen s) {
         if (moreStatsScreen == null || moreStatsScreen.statTypeDropdown == null) {
             return;
         }
+        int statTypeIndex = moreStatsScreen.statTypeDropdown.getSelectedIndex();
+        if (!isTierListPage(statTypeIndex)) {
+            if (tierExportHb != null) {
+                tierExportHb.unhover();
+                tierExportHb.clicked = false;
+                tierExportHb.clickStarted = false;
+            }
+            return;
+        }
+
         float screenX = Utils.getField(s, StatsScreen.class, "screenX");
         float scrollY = Utils.getField(s, StatsScreen.class, "scrollY");
         float labelY = scrollY + screenPosY(950);
@@ -851,12 +885,18 @@ public class StatsScreenPatch {
         if (isAnyDropdownOpen()) {
             tierExportHb.unhover();
             tierExportHb.clicked = false;
+            tierExportHb.clickStarted = false;
             return;
         }
+
+        // 两段式 update：
+        // update(x, y) 只更新 hover；update() 才会根据 clickStarted/justReleasedClickLeft 置 clicked。
         tierExportHb.update(btnX, btnY);
+        tierExportHb.update();
         if (tierExportHb.clicked) {
             tierExportHb.clicked = false;
-            startTierListExport();
+            tierExportHb.clickStarted = false;
+            startTierListExport(scopeForStatType(statTypeIndex));
         }
     }
 
@@ -872,15 +912,16 @@ public class StatsScreenPatch {
                 || (moreStatsScreen.sampleSizeDropdown != null && moreStatsScreen.sampleSizeDropdown.isOpen);
     }
 
-    private static void startTierListExport() {
+    private static void startTierListExport(TierListScope scope) {
         if (exportingTierList) {
             return;
         }
         exportingTierList = true;
         tierExportStatus = Localization.get(LocalizationKeys.UI_EXPORTING_TIER_LIST);
         tierExportStatusUntil = Long.MAX_VALUE;
+        tinycat.logger.info("TierList export started: " + (scope == null ? "all" : scope.key));
         try {
-            String path = TierListExporter.export(moreStatsScreen);
+            String path = TierListExporter.export(moreStatsScreen, scope);
             tierExportStatus = Localization.get(LocalizationKeys.UI_EXPORT_DONE, path);
             tinycat.logger.info("TierList export finished: " + path);
         } catch (Exception t) {
@@ -981,7 +1022,9 @@ public class StatsScreenPatch {
                     Settings.CREAM_COLOR);
         }
 
-        renderTierListExportButton(sb, screenX, dropdownY, sampleSizeX);
+        if (isTierListPage(statTypeIndex)) {
+            renderTierListExportButton(sb, screenX, dropdownY, sampleSizeX);
+        }
 
         moreStatsScreen.startDateDropdown.render(sb, startDateX, dropdownY);
         moreStatsScreen.endDateDropDown.render(sb, endDateX, dropdownY);

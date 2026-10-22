@@ -45,8 +45,15 @@ public final class TierListBuilder {
     }
 
     public static TierListModel build(MoreStatsScreen screen) {
+        return build(screen, TierListScope.ALL);
+    }
+
+    public static TierListModel build(MoreStatsScreen screen, TierListScope scope) {
         if (screen == null) {
             throw new IllegalStateException("statistics screen is not initialized");
+        }
+        if (scope == null) {
+            scope = TierListScope.ALL;
         }
         ClassStat cs = screen.getClassStat();
         if (cs == null) {
@@ -60,26 +67,32 @@ public final class TierListBuilder {
         int minSample = screen.sampleSizeDropdown == null ? 0 : screen.sampleSizeDropdown.getSelectedIndex();
 
         List<TierListGroup> groups = new ArrayList<TierListGroup>(4);
-        groups.add(buildCards("cards_act1",
-                "Card pick rate - Act 1",
-                "第一幕卡牌选取率",
-                cs.cardPicksAct1,
-                minSample));
-        groups.add(buildCards("cards_after_act1",
-                "Card pick rate - After Act 1",
-                "第一幕后卡牌选取率",
-                cs.cardPicksAfterAct1,
-                minSample));
-        groups.add(buildRelics("boss_relics_act1",
-                "Boss relic pick rate - Act 1",
-                "第一幕 BOSS 遗物选取率",
-                cs.bossRelicPickRateAct1,
-                minSample));
-        groups.add(buildRelics("boss_relics_act2",
-                "Boss relic pick rate - Act 2",
-                "第二幕 BOSS 遗物选取率",
-                cs.bossRelicPickRateAct2,
-                minSample));
+        if (scope == TierListScope.ALL || scope == TierListScope.CARDS_ACT1) {
+            groups.add(buildCards("cards_act1",
+                    "Card pick rate - Act 1",
+                    "第一幕卡牌选取率",
+                    cs.cardPicksAct1,
+                    minSample));
+        }
+        if (scope == TierListScope.ALL || scope == TierListScope.CARDS_AFTER_ACT1) {
+            groups.add(buildCards("cards_after_act1",
+                    "Card pick rate - After Act 1",
+                    "第一幕后卡牌选取率",
+                    cs.cardPicksAfterAct1,
+                    minSample));
+        }
+        if (scope == TierListScope.ALL || scope == TierListScope.BOSS_RELICS) {
+            groups.add(buildRelics("boss_relics_act1",
+                    "Boss relic pick rate - Act 1",
+                    "第一幕 BOSS 遗物选取率",
+                    cs.bossRelicPickRateAct1,
+                    minSample));
+            groups.add(buildRelics("boss_relics_act2",
+                    "Boss relic pick rate - Act 2",
+                    "第二幕 BOSS 遗物选取率",
+                    cs.bossRelicPickRateAct2,
+                    minSample));
+        }
 
         String generatedAt = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
         String startDate = dateAt(screen.startDates, screen.startDateDropdown == null ? 0 : screen.startDateDropdown.getSelectedIndex());
@@ -97,6 +110,7 @@ public final class TierListBuilder {
                 includeAbandons,
                 minSample,
                 runCount,
+                scope,
                 groups);
     }
 

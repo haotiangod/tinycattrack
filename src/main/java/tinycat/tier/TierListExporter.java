@@ -48,7 +48,11 @@ public final class TierListExporter {
     }
 
     public static String export(MoreStatsScreen screen) throws Exception {
-        TierListModel model = TierListBuilder.build(screen);
+        return export(screen, TierListScope.ALL);
+    }
+
+    public static String export(MoreStatsScreen screen, TierListScope scope) throws Exception {
+        TierListModel model = TierListBuilder.build(screen, scope);
         File exportRoot = Gdx.files.local(EXPORT_ROOT).file();
         if (!ensureDir(exportRoot)) {
             // 游戏目录可能不可写；退回用户目录，仍然完全本地
@@ -98,7 +102,8 @@ public final class TierListExporter {
     private static String folderName(TierListModel model) {
         String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
         String character = model.characterId == null ? "UNKNOWN" : model.characterId;
-        return "TinyCat_TierList_" + character + "_" + timestamp;
+        String scope = model.scope == null ? "all" : model.scope.key;
+        return "TinyCat_TierList_" + character + "_" + scope + "_" + timestamp;
     }
 
     private static void writeCsv(TierListModel model, File file) throws IOException {
@@ -148,6 +153,12 @@ public final class TierListExporter {
         character.put("name_zh", model.characterZh);
         character.put("rotate", model.rotate);
         root.put("character", character);
+
+        Map<String, Object> scope = new LinkedHashMap<String, Object>();
+        scope.put("key", model.scope == null ? "all" : model.scope.key);
+        scope.put("label_en", model.scope == null ? "All pick rates" : model.scope.labelEn);
+        scope.put("label_zh", model.scope == null ? "全部抓率" : model.scope.labelZh);
+        root.put("scope", scope);
 
         Map<String, Object> dateRange = new LinkedHashMap<String, Object>();
         dateRange.put("start", model.startDate);
@@ -260,6 +271,8 @@ public final class TierListExporter {
         html.append("<p class=\"sub\">Slay the Spire · local run history export / 杀戮尖塔本地对局历史导出</p>\n");
         html.append("<div class=\"chips\">\n");
         html.append(chip("Character / 角色", model.characterZh + " / " + model.characterEn));
+        html.append(chip("Scope / 范围", (model.scope == null ? "全部抓率" : model.scope.labelZh) + " / "
+                + (model.scope == null ? "All pick rates" : model.scope.labelEn)));
         html.append(chip("Date / 日期", empty(model.startDate) + " ~ " + empty(model.endDate)));
         html.append(chip("Runs / 对局", Integer.toString(model.runCount)));
         html.append(chip("Min sample / 最小样本", Integer.toString(model.minSample)));
@@ -332,6 +345,8 @@ public final class TierListExporter {
         text.append("Mod version : TinyCat ").append(MOD_VERSION).append("\n");
         text.append("Generated   : ").append(model.generatedAt).append("\n");
         text.append("Character   : ").append(model.characterZh).append(" / ").append(model.characterEn).append("\n");
+        text.append("Scope       : ").append(model.scope == null ? "全部抓率" : model.scope.labelZh)
+                .append(" / ").append(model.scope == null ? "All pick rates" : model.scope.labelEn).append("\n");
         text.append("Date range  : ").append(empty(model.startDate)).append(" ~ ").append(empty(model.endDate)).append("\n");
         text.append("Runs        : ").append(model.runCount).append("\n");
         text.append("Min sample  : ").append(model.minSample).append("\n");

@@ -17,6 +17,7 @@ public class TierListModel {
     public final boolean includeAbandons;
     public final int minSample;
     public final int runCount;
+    public final TierListScope scope;
     public final List<TierListGroup> groups;
 
     public TierListModel(String generatedAt,
@@ -29,6 +30,7 @@ public class TierListModel {
                          boolean includeAbandons,
                          int minSample,
                          int runCount,
+                         TierListScope scope,
                          List<TierListGroup> groups) {
         this.generatedAt = generatedAt;
         this.characterId = characterId;
@@ -40,6 +42,7 @@ public class TierListModel {
         this.includeAbandons = includeAbandons;
         this.minSample = minSample;
         this.runCount = runCount;
+        this.scope = scope;
         this.groups = groups;
     }
 
