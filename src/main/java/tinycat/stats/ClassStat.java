@@ -43,7 +43,10 @@ public class ClassStat {
     public Mean averageWinningTime;
     public Mean averageDeckSize;
     public Mean averageScore;
-    public Mean averageGold;  // 平均金钱
+    public Mean averageGold;  // 平均累计获得金币（估算）
+    public int goldEstimatedRuns = 0;
+    public int goldExactRuns = 0;
+    public int floor0HPEstimatedRuns = 0;
     public int minDeckSize = 0;
     public int maxDeckSize = 0;
     public List<Rate<Card>> cardPicksAct1;
@@ -306,10 +309,21 @@ public class ClassStat {
         int shopValidCountAct3Loss = 0;
         int shopValidCountAct4Win = 0;
         int shopValidCountAct4Loss = 0;
+        int goldEstimatedRuns = 0;
+        int goldExactRuns = 0;
+        int floor0HPEstimatedRuns = 0;
         private void deckSizeStats(Run run) {
             averageDeckSize.add(run.masterDeck.size());
             averageScore.add(run.score);
-            averageGold.add(run.gold);  // 统计金钱
+            averageGold.add(run.gold);  // 累计获得金币（估算）
+            if (run.goldEstimated) {
+                goldEstimatedRuns++;
+            } else {
+                goldExactRuns++;
+            }
+            if (run.floor0HPEstimated) {
+                floor0HPEstimatedRuns++;
+            }
         }
 
         private void cardPickStats(Run run) {
@@ -636,7 +650,6 @@ public class ClassStat {
         private void runTimeStats(Run run) {
             if (run.isHeartKill) {
                 averageWinningTime.add(run.playtime);
-                averageScore.add(run.score);
             }
         }
 
@@ -678,8 +691,6 @@ public class ClassStat {
                     totalEventHPLossPerAct.get(act).add(eventSum);
                 }
             }
-            
-            deckSizeStats(run);
         }
         
         /**
@@ -1050,6 +1061,7 @@ public class ClassStat {
         void collect(Run run) {
             runCount++;
             cardPickStats(run);
+            deckSizeStats(run);
             deckStats(run);
             neowStats(run);
             bossRelicStats(run);
@@ -1112,6 +1124,14 @@ public class ClassStat {
             // 插入战斗总计到各序列开头
             insertHPLossTotal(cs);
 
+            Map<Integer, List<Mean>> allHpLoss = new HashMap<>();
+            for (int act : new int[]{1, 2, 3, 4}) {
+                List<Mean> one = new ArrayList<>();
+                one.add(totalAllHPLossPerAct.get(act));
+                allHpLoss.put(act, one);
+            }
+            cs.averageAllHPLoss = allHpLoss;
+
             cs.nob = nob;
             encounterDeadRate.forEach((k, v) -> {
                 cs.encounterDeadRate.put(k, sortedMapValues(v));
@@ -1124,7 +1144,10 @@ public class ClassStat {
             cs.averageDeckSize = averageDeckSize;
             cs.averageWinningTime = averageWinningTime;
             cs.averageScore = averageScore;
-            cs.averageGold = averageGold;  // 赋值平均金钱
+            cs.averageGold = averageGold;  // 赋值累计获得金币（估算）
+            cs.goldEstimatedRuns = goldEstimatedRuns;
+            cs.goldExactRuns = goldExactRuns;
+            cs.floor0HPEstimatedRuns = floor0HPEstimatedRuns;
 
             cs.eventWinRateAct1 = sortedMapValues(eventWinRate.get(1));
             cs.eventWinRateAct2 = sortedMapValues(eventWinRate.get(2));

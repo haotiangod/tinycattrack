@@ -148,9 +148,11 @@ actualHPLoss = hpBefore - hpAfter
 
 `.run` 里的 `gold` 是最终剩余金币，精确，但当前没直接使用。
 
-`ClassStat.averageGold` 对 `run.gold` 求平均，UI 文案“平均金钱”实际表示累计获得金币估算。
+`ClassStat.averageGold` 对 `run.gold` 求平均。当前口径已确认：**累计获得金币，估算值**；UI 会显示“（估算）”，CSV 会带 `gold_estimated` 说明。
 
-**待确认**：金币指标要“最终剩余”还是“累计获得”。StateNotes 许可证/接入见 `STATE-NOTES-AND-GOLD.md`。
+`.run` 里没有累计获得金币字段，只有最终剩余金币 `gold`；逐事件精确累计需要额外数据源（StateNotes 许可证/接入见 `STATE-NOTES-AND-GOLD.md`）。
+
+**第 1 层战损**：`.run` 的第 1 层 HP 不可靠，当前用“第 1 层受到伤害”估算；Ironclad 再减 6（Burning Blood）。UI 会显示“第1层战损：估算”。
 
 ## 6. Rate 的语义
 
@@ -173,13 +175,34 @@ StatsScreenPatch 当前页面
 
 导出范围：
 
+- 总体统计 → `ALL`：四组 Tier List + 全部统计 CSV
 - 第一幕卡牌选取率 → `cards_act1`
 - 第一幕后卡牌选取率 → `cards_after_act1`
 - BOSS 遗物选取率 → `boss_relics_act1 + boss_relics_act2`
 
 按钮只在上述页面出现；其他页面不显示。
 
-## 8. 当前重构状态
+CSV 文件：
+
+- `data.csv`：Tier List 条目
+- `summary.csv`：角色/筛选/基础统计/估算标记
+- `all_stats.csv`：长表，覆盖所有 ClassStat 维度（卡牌、Neow、Boss 遗物、战斗、事件、遗物、删牌、火堆、商店、Meta 等）
+
+## 8. 金币估算校验
+
+脚本：`scripts/validate_gold_estimate.py`
+
+在 1113 个真实 `.run` 上运行的结果：
+
+- `gold_track` 精确文件：0 个
+- 估算累计金币始终 ≥ 最终金币（1113/1113）
+- 估算 - 最终 的平均差：813.25，中位数 761
+- 没有“无消费局”可用于隔离 Neow 起始金币误差
+- 第 1 层战损估算（Ironclad damage-6）均值约 -0.10，中位数 0.00；其他角色均值 1–3
+
+结论：当前 `.run` 无法验证累计金币真值；公式只能保证“累计估算 ≥ 最终剩余”，差额主要是消费。要精确必须接逐事件金币数据源，且需许可证。
+
+## 9. 当前重构状态
 
 已完成：
 
@@ -190,6 +213,8 @@ StatsScreenPatch 当前页面
 - 角色颜色按索引
 - 图片缓存
 - `tierlist.jpg/png`
+- 总体页导出全部统计 CSV（`summary.csv` + `all_stats.csv`）
+- 修复 `averageScore` 被重复累加、以及 `eventStats` 为空时跳过 deck/gold 统计的问题
 
 待做：
 
@@ -197,4 +222,4 @@ StatsScreenPatch 当前页面
 - `StatsScreenPatch` 拆分 renderer
 - `MoreStatsScreen` 5 份 ClassStat 缓存/增量
 - 导出后台化/进度
-- 金币口径确认后接 StateNotes（需授权）
+- StateNotes 授权后接精确金币/HP

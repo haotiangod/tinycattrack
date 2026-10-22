@@ -86,6 +86,7 @@ public final class TierListExporter {
             }
             writeCsv(model, new File(root, "data.csv"));
             writeJson(model, new File(root, "data.json"));
+            AllStatsExporter.write(screen, model, root);
             try {
                 TierListImageRenderer.write(model, root);
             } catch (Exception t) {
@@ -303,6 +304,12 @@ public final class TierListExporter {
         if (new File(file.getParentFile(), "tierlist.png").isFile()) {
             html.append("<a href=\"tierlist.png\">tierlist.png</a>");
         }
+        if (new File(file.getParentFile(), "summary.csv").isFile()) {
+            html.append("<a href=\"summary.csv\">summary.csv</a>");
+        }
+        if (new File(file.getParentFile(), "all_stats.csv").isFile()) {
+            html.append("<a href=\"all_stats.csv\">all_stats.csv</a>");
+        }
         html.append("<a href=\"data.csv\">data.csv</a><a href=\"data.json\">data.json</a><a href=\"README.txt\">README.txt</a></div>\n");
 
         for (TierListGroup group : model.groups) {
@@ -370,6 +377,8 @@ public final class TierListExporter {
         text.append("-----\n");
         text.append("data.csv      - one row per entry, UTF-8 with BOM (Excel friendly)\n");
         text.append("data.json     - structured data with tier/group metadata\n");
+        text.append("summary.csv   - character/filter/basic stats + estimation flags\n");
+        text.append("all_stats.csv - long-form CSV for every TinyCat statistic dimension\n");
         text.append("tierlist.html - self-contained visual tier list (open in any browser)\n");
         text.append("tierlist.jpg  - shareable full tier-list image (JPEG)\n");
         text.append("tierlist.png  - shareable full tier-list image (lossless PNG)\n");

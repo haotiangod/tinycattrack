@@ -813,9 +813,18 @@ public class StatsScreenPatch {
             sb.setColor(Color.WHITE);
         }
 
-        String text = exportingTierList
-                ? Localization.get(LocalizationKeys.UI_EXPORTING_TIER_LIST)
-                : Localization.get(LocalizationKeys.UI_EXPORT_TIER_LIST);
+        String text;
+        if (moreStatsScreen != null
+                && moreStatsScreen.statTypeDropdown != null
+                && moreStatsScreen.statTypeDropdown.getSelectedIndex() == 0) {
+            text = exportingTierList
+                    ? Localization.get(LocalizationKeys.UI_EXPORTING_TIER_LIST)
+                    : Localization.get(LocalizationKeys.UI_EXPORT_ALL_TIER_LIST);
+        } else {
+            text = exportingTierList
+                    ? Localization.get(LocalizationKeys.UI_EXPORTING_TIER_LIST)
+                    : Localization.get(LocalizationKeys.UI_EXPORT_TIER_LIST);
+        }
         FontHelper.renderFontCentered(sb,
                 FontHelper.tipBodyFont,
                 text,
@@ -836,12 +845,14 @@ public class StatsScreenPatch {
     }
 
     private static boolean isTierListPage(int statTypeIndex) {
-        // 1: 第一幕卡牌选取率；2: 第一幕后卡牌选取率；5: BOSS 遗物选取率
-        return statTypeIndex == 1 || statTypeIndex == 2 || statTypeIndex == 5;
+        // 0: 总体统计，导出全部四组 + 全部统计 CSV；1/2: 卡牌；5: BOSS 遗物
+        return statTypeIndex == 0 || statTypeIndex == 1 || statTypeIndex == 2 || statTypeIndex == 5;
     }
 
     private static TierListScope scopeForStatType(int statTypeIndex) {
         switch (statTypeIndex) {
+            case 0:
+                return TierListScope.ALL;
             case 1:
                 return TierListScope.CARDS_ACT1;
             case 2:

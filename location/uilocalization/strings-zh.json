@@ -83,6 +83,7 @@
         "yes": "是",
         "no": "否",
         "export_tier_list": "导出抓率梯度",
+        "export_all_tier_list": "导出全部统计",
         "exporting_tier_list": "导出中...",
         "export_done": "已导出：%s",
         "export_failed": "导出失败：%s"
@@ -137,7 +138,9 @@
         "avg_campfire_purges": "平均篝火删牌",
         "avg_event_purges": "平均事件删牌",
         "avg_score": "平均得分",
-        "avg_gold": "平均金钱",
+        "avg_gold": "平均累计金币",
+        "avg_gold_estimated": "（估算）",
+        "floor1_hp_loss_estimated": "第1层战损：估算",
         "total_encounters": "总遭遇",
             "total_events": "总事件",
         "neow_purges": "尼奥斯删牌",

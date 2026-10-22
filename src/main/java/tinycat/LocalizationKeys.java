@@ -32,6 +32,7 @@ public class LocalizationKeys {
     public static final String UI_CAMPFIRE_UPGRADE_RATE = "ui.campfire_upgrade_rate";
     public static final String UI_META_SCALING = "ui.meta_scaling";
     public static final String UI_EXPORT_TIER_LIST = "ui.export_tier_list";
+    public static final String UI_EXPORT_ALL_TIER_LIST = "ui.export_all_tier_list";
     public static final String UI_EXPORTING_TIER_LIST = "ui.exporting_tier_list";
     public static final String UI_EXPORT_DONE = "ui.export_done";
     public static final String UI_EXPORT_FAILED = "ui.export_failed";
@@ -106,6 +107,8 @@ public class LocalizationKeys {
     public static final String AVG_CAMPFIRE_PURGES = "stat.avg_campfire_purges";  // 新增：篝火删牌平均值
     public static final String AVG_EVENT_PURGES = "stat.avg_event_purges";  // 修正：仅事件删牌（包括花钱的事件）
     public static final String AVG_SCORE = "stat.avg_score";
-    public static final String AVG_GOLD = "stat.avg_gold";  // 新增：平均金钱
+    public static final String AVG_GOLD = "stat.avg_gold";  // 平均累计金币（估算）
+    public static final String AVG_GOLD_ESTIMATED = "stat.avg_gold_estimated";
+    public static final String FLOOR1_HP_LOSS_ESTIMATED = "stat.floor1_hp_loss_estimated";
     public static final String PURGE_SOURCES = "stat.purge_sources";
 }

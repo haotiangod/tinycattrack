@@ -92,7 +92,7 @@ tinycat/
 - **火堆行动统计**：各行动类型统计（升级按卡牌明细，其他按类型）
 - **商店行动统计**：购买卡牌、遗物、药水、删牌等明细
 - **伤害统计**：平均承受伤害、实际 HP 损失（含/不含治疗）
-- **Tier List 导出**：在「第一幕卡牌选取率 / 第一幕后卡牌选取率 / BOSS 遗物选取率」页面右上角一键导出 CSV + JSON + HTML + 整图（tierlist.jpg/png）+ 卡图/遗物图；图片使用本地缓存，重复导出不再反复提取（全部取自本地游戏，不依赖外部图源）
+- **全部统计导出**：总体统计页可导出全部四组 Tier List + `summary.csv` + `all_stats.csv`（卡牌/Neow/Boss 遗物/战斗/事件/遗物/删牌/火堆/商店/Meta 全维度），并附 HTML、`tierlist.jpg/png`、卡图/遗物图；图片使用本地缓存，重复导出不再反复提取（全部取自本地游戏，不依赖外部图源）
 
 ### 3. 数据筛选
 - 按日期范围筛选
@@ -137,6 +137,7 @@ gradle buildJAR
 | 脚本 | 用途 |
 |------|------|
 | `verify_purge_logic_v2.py` | 校验删牌统计数据是否与对局记录一致 |
+| `scripts/validate_gold_estimate.py` | 用真实 `.run` / `gold_track` 校验累计金币估算与第 1 层战损估算 |
 | `format_json.py` | 智能格式化 JSON 文件（空数组紧凑显示） |
 
 ---
@@ -263,7 +264,8 @@ StatsScreenPatch → MoreStatsScreen → CharStatRenderer
 
 ### 已知限制
 
-1. **金币估算**：未安装 gold-tracker 时，金币数据为公式估算值而非精确值，商店购买明细可能不准确
+1. **金币估算**：未安装 gold-tracker 时，金币数据为公式估算的“累计获得金币”，不是精确值；UI/CSV 会标注估算
+2. **第 1 层战损估算**：`.run` 第 1 层 HP 不可靠，当前按受到伤害估算；Ironclad 减 6（Burning Blood），UI/CSV 会标注估算
 2. **Mod 卡牌检测**：仅通过名称中是否包含 `:` 来判断 Mod 内容，可能漏判或误判
 3. **第0层HP**：Ironclad 的 Burning Blood 回血 6 为硬编码，若游戏更新改变此数值，估算法将失效
 4. **硬编码黑名单**：`Run.java` 中的 `bannedCards`、`bannedRelics` 等列表需手动维护，新 Mod 内容可能未被过滤

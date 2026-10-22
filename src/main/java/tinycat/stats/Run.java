@@ -41,6 +41,10 @@ public class Run implements Comparable<Run> {
     public final int playtime;
     public final int score;
     public final int gold;
+    /** true 表示 gold 是用 gold_per_floor 估算的累计获得金币，不是逐事件精确值。 */
+    public boolean goldEstimated = true;
+    /** true 表示第 1 层战损使用 damage-6/估算，不是精确起始 HP。 */
+    public boolean floor0HPEstimated = false;
     public final int maxHP;
     public final int potionsCreated;
     public final int lessonsLearned;
@@ -404,8 +408,10 @@ public class Run implements Comparable<Run> {
         // 优先从 gold-tracker 模组输出文件读取精确累计金币
         int exactGold = readGoldTrackerOutput();
         if (exactGold > 0) {
+            goldEstimated = false;
             return exactGold;
         }
+        goldEstimated = true;
 
         // 回退到 gold_per_floor 公式估算 (条件公式 vF)
         // 按 neow_bonus 分组使用不同扣除常数，最小化 RMSE(sqrt(E^2+S^2))
@@ -527,6 +533,7 @@ public class Run implements Comparable<Run> {
         // 优先级3: 估算法（基于第1层受到伤害反推第0层HP）
         // floor0HP = floor1HP + floor1Damage - 6 (Ironclad, Burning Blood回血)
         // floor0HP = floor1HP + floor1Damage (其他角色，无自带回复)
+        floor0HPEstimated = true;
         if (runData.current_hp_per_floor != null && !runData.current_hp_per_floor.isEmpty()) {
             int floor1HP = runData.current_hp_per_floor.get(0);
             int floor1Damage = 0;

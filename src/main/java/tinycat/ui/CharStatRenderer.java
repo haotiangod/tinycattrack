@@ -57,6 +57,10 @@ public class CharStatRenderer {
             }
         }
 
+        if (cs.floor0HPEstimatedRuns > 0) {
+            this.info += Localization.get(LocalizationKeys.FLOOR1_HP_LOSS_ESTIMATED) + " NL ";
+        }
+
         this.info2 = CharStat.TEXT[17] + cs.numVictory + " NL ";
         this.info2 = this.info2 + CharStat.TEXT[18] + cs.numDeath + " NL ";
         this.info2 = this.info2 + CharStat.TEXT[19] + cs.totalFloorsClimbed + " NL ";
@@ -66,7 +70,11 @@ public class CharStatRenderer {
             this.info2 += Localization.get(LocalizationKeys.AVG_SCORE) + ": #y" + String.format("%.0f", cs.averageScore.mean()) + " NL ";
         }
         if (cs.averageGold.getSampleSize() > 0) {
-            this.info2 += Localization.get(LocalizationKeys.AVG_GOLD) + ": #y" + String.format("%.0f", cs.averageGold.mean()) + " NL ";
+            String goldLabel = Localization.get(LocalizationKeys.AVG_GOLD);
+            if (cs.goldEstimatedRuns > 0) {
+                goldLabel += Localization.get(LocalizationKeys.AVG_GOLD_ESTIMATED);
+            }
+            this.info2 += goldLabel + ": #y" + String.format("%.0f", cs.averageGold.mean()) + " NL ";
         }
         this.info2 += Localization.get(LocalizationKeys.WIN_RATE) + ": #y" + Utils.calculatePercent(cs.numVictory, cs.numDeath + cs.numVictory) + " NL ";
         this.info2 += Localization.get(LocalizationKeys.SURVIVAL_RATE_PER_ACT) + ": " +
