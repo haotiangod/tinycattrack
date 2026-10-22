@@ -9,6 +9,11 @@ import com.megacrit.cardcrawl.characters.AbstractPlayer;
 import com.megacrit.cardcrawl.screens.stats.*;
 import org.apache.commons.lang3.tuple.Pair;
 
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.Charset;
+import java.nio.charset.CodingErrorAction;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
@@ -663,7 +668,7 @@ public class Run implements Comparable<Run> {
         String path = file.path() == null ? "" : file.path();
 
         try {
-            data = gson.fromJson(file.readString(), RunData.class);
+            data = gson.fromJson(readRunText(file), RunData.class);
         } catch (Exception e) {
             tinycat.logger.info("Failed to load RunData from JSON file: " + path);
             return Optional.empty();
@@ -698,6 +703,38 @@ public class Run implements Comparable<Run> {
         }
 
         return Optional.of(new Run(data, playerClass, file.parent().name()));
+    }
+
+    /**
+     * RunHistoryPlus 写出的 .run 文件在中文 Windows 上是 GBK 编码，
+     * 但旧代码用 FileHandle.readString() 依赖系统默认字符集。
+     * 这里用严格解码先试 UTF-8，再试 GBK，避免换 locale 后整批 run 解析失败。
+     */
+    private static String readRunText(FileHandle file) {
+        byte[] bytes = file.readBytes();
+        String text = decodeStrict(bytes, StandardCharsets.UTF_8);
+        if (text == null) {
+            text = decodeStrict(bytes, Charset.forName("GBK"));
+        }
+        if (text == null) {
+            text = new String(bytes, Charset.defaultCharset());
+        }
+        if (!text.isEmpty() && text.charAt(0) == '\uFEFF') {
+            text = text.substring(1);
+        }
+        return text;
+    }
+
+    private static String decodeStrict(byte[] bytes, Charset charset) {
+        try {
+            return charset.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(bytes))
+                    .toString();
+        } catch (CharacterCodingException e) {
+            return null;
+        }
     }
 
     public boolean isInRange(YearMonth startDate, YearMonth endDate) {

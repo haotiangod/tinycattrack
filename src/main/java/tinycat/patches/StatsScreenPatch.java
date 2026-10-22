@@ -18,6 +18,7 @@ import com.megacrit.cardcrawl.core.Settings;
 import com.megacrit.cardcrawl.helpers.FontHelper;
 import com.megacrit.cardcrawl.helpers.Hitbox;
 import com.megacrit.cardcrawl.helpers.ImageMaster;
+import com.megacrit.cardcrawl.helpers.input.InputHelper;
 import com.megacrit.cardcrawl.screens.mainMenu.ScrollBar;
 import com.megacrit.cardcrawl.screens.stats.AchievementGrid;
 import com.megacrit.cardcrawl.screens.stats.StatsScreen;
@@ -882,6 +883,9 @@ public class StatsScreenPatch {
         tierExportHb.width = btnW;
         tierExportHb.height = btnH;
 
+        boolean pointerInside = InputHelper.mX > btnX && InputHelper.mX < btnX + btnW
+                && InputHelper.mY > btnY && InputHelper.mY < btnY + btnH;
+
         if (isAnyDropdownOpen()) {
             tierExportHb.unhover();
             tierExportHb.clicked = false;
@@ -893,7 +897,9 @@ public class StatsScreenPatch {
         // update(x, y) 只更新 hover；update() 才会根据 clickStarted/justReleasedClickLeft 置 clicked。
         tierExportHb.update(btnX, btnY);
         tierExportHb.update();
-        if (tierExportHb.clicked) {
+        boolean clicked = tierExportHb.clicked
+                || (InputHelper.justReleasedClickLeft && pointerInside);
+        if (clicked) {
             tierExportHb.clicked = false;
             tierExportHb.clickStarted = false;
             startTierListExport(scopeForStatType(statTypeIndex));

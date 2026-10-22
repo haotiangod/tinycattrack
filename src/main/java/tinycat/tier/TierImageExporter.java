@@ -20,11 +20,13 @@ import com.megacrit.cardcrawl.relics.AbstractRelic;
 import tinycat.tinycat;
 
 import java.io.File;
-import java.util.HashSet;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
+import java.security.MessageDigest;
 import java.util.IdentityHashMap;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * 从游戏内存导出卡图/遗物图。
@@ -46,32 +48,53 @@ public class TierImageExporter {
     private static final String SKIP_PATH = "images/skip.png";
     private static final int FBO_SIZE = 1024;
 
+    private final File imagesDir;
     private final File cardsDir;
     private final File relicsDir;
+    private final File cardsCacheDir;
+    private final File relicsCacheDir;
+    private final File commonCacheDir;
     private final Map<Texture, Pixmap> pageCache = new IdentityHashMap<Texture, Pixmap>();
-    private final Set<String> usedNames = new HashSet<String>();
 
     private FrameBuffer frameBuffer;
     private SpriteBatch batch;
     private Matrix4 matrix;
 
     public TierImageExporter(File imagesDir) {
+        this(imagesDir, new File(imagesDir.getParentFile(), "cache"));
+    }
+
+    public TierImageExporter(File imagesDir, File cacheDir) {
         imagesDir.mkdirs();
+        cacheDir.mkdirs();
+        this.imagesDir = imagesDir;
         this.cardsDir = new File(imagesDir, "cards");
         this.relicsDir = new File(imagesDir, "relics");
+        this.cardsCacheDir = new File(cacheDir, "cards");
+        this.relicsCacheDir = new File(cacheDir, "relics");
+        this.commonCacheDir = new File(cacheDir, "common");
         this.cardsDir.mkdirs();
         this.relicsDir.mkdirs();
+        this.cardsCacheDir.mkdirs();
+        this.relicsCacheDir.mkdirs();
+        this.commonCacheDir.mkdirs();
 
-        writePlaceholder(new File(imagesDir, "placeholder.png"), "NO IMAGE", 3, 220, 190);
-        writePlaceholder(new File(imagesDir, "skip.png"), "SKIP", 6, 220, 190);
+        File skip = new File(commonCacheDir, "skip.png");
+        if (!isUsable(skip)) {
+            writePlaceholder(skip, "SKIP", 6, 220, 190);
+        }
+        File placeholder = new File(commonCacheDir, "placeholder.png");
+        if (!isUsable(placeholder)) {
+            writePlaceholder(placeholder, "NO IMAGE", 3, 220, 190);
+        }
     }
 
     public String export(TierEntry entry) {
         if (entry == null) {
-            return PLACEHOLDER_PATH;
+            return exportCommon("placeholder.png", PLACEHOLDER_PATH);
         }
         if ("skip".equals(entry.type)) {
-            return SKIP_PATH;
+            return exportCommon("skip.png", SKIP_PATH);
         }
         if ("card".equals(entry.type)) {
             return exportCard(entry);
@@ -79,41 +102,75 @@ public class TierImageExporter {
         if ("boss_relic".equals(entry.type)) {
             return exportRelic(entry);
         }
-        return PLACEHOLDER_PATH;
+        return exportCommon("placeholder.png", PLACEHOLDER_PATH);
     }
 
     private String exportCard(TierEntry entry) {
-        try {
-            AbstractCard card = CardLibrary.getCard(entry.id);
-            if (card == null || card.portrait == null) {
-                return PLACEHOLDER_PATH;
+        String key = cacheKey("card_" + entry.id);
+        File cacheFile = new File(cardsCacheDir, key + ".png");
+        File packageFile = new File(cardsDir, key + ".png");
+        if (!isUsable(cacheFile)) {
+            if (!extractCard(entry, cacheFile)) {
+                return exportCommon("placeholder.png", PLACEHOLDER_PATH);
             }
-            String fileName = uniqueSlug("card_" + entry.id) + ".png";
-            File file = new File(cardsDir, fileName);
-            if (writeRegion(card.portrait, file)) {
-                return "images/cards/" + fileName;
-            }
-        } catch (Exception t) {
-            tinycat.logger.warn("TierList: failed to export card image for " + entry.id, t);
         }
-        return PLACEHOLDER_PATH;
+        if (copyFile(cacheFile, packageFile)) {
+            return "images/cards/" + key + ".png";
+        }
+        return exportCommon("placeholder.png", PLACEHOLDER_PATH);
     }
 
     private String exportRelic(TierEntry entry) {
+        String key = cacheKey("relic_" + entry.id);
+        File cacheFile = new File(relicsCacheDir, key + ".png");
+        File packageFile = new File(relicsDir, key + ".png");
+        if (!isUsable(cacheFile)) {
+            if (!extractRelic(entry, cacheFile)) {
+                return exportCommon("placeholder.png", PLACEHOLDER_PATH);
+            }
+        }
+        if (copyFile(cacheFile, packageFile)) {
+            return "images/relics/" + key + ".png";
+        }
+        return exportCommon("placeholder.png", PLACEHOLDER_PATH);
+    }
+
+    private boolean extractCard(TierEntry entry, File file) {
+        try {
+            AbstractCard card = CardLibrary.getCard(entry.id);
+            if (card == null || card.portrait == null) {
+                return false;
+            }
+            return writeRegion(card.portrait, file);
+        } catch (Exception t) {
+            tinycat.logger.warn("TierList: failed to export card image for " + entry.id, t);
+            return false;
+        }
+    }
+
+    private boolean extractRelic(TierEntry entry, File file) {
         try {
             AbstractRelic relic = RelicLibrary.getRelic(entry.id);
             if (relic == null || relic.img == null) {
-                return PLACEHOLDER_PATH;
+                return false;
             }
-            String fileName = uniqueSlug("relic_" + entry.id) + ".png";
-            File file = new File(relicsDir, fileName);
-            if (writeTexture(relic.img, file)) {
-                return "images/relics/" + fileName;
-            }
+            return writeTexture(relic.img, file);
         } catch (Exception t) {
             tinycat.logger.warn("TierList: failed to export relic image for " + entry.id, t);
+            return false;
         }
-        return PLACEHOLDER_PATH;
+    }
+
+    private String exportCommon(String cacheName, String relativePath) {
+        File cacheFile = new File(commonCacheDir, cacheName);
+        if (!isUsable(cacheFile)) {
+            return relativePath;
+        }
+        File packageFile = new File(imagesDir, cacheName);
+        if (copyFile(cacheFile, packageFile)) {
+            return relativePath;
+        }
+        return relativePath;
     }
 
     private boolean writeRegion(TextureAtlas.AtlasRegion region, File file) {
@@ -366,22 +423,48 @@ public class TierImageExporter {
         }
     }
 
-    private String uniqueSlug(String raw) {
+    private String cacheKey(String raw) {
         String base = raw.toLowerCase(Locale.US).replaceAll("[^a-z0-9]+", "_");
         base = base.replaceAll("^_+", "").replaceAll("_+$", "");
         if (base.isEmpty()) {
             base = "image";
         }
-        if (base.length() > 90) {
-            base = base.substring(0, 90);
+        if (base.length() > 60) {
+            base = base.substring(0, 60);
         }
-        String candidate = base;
-        int suffix = 2;
-        while (!usedNames.add(candidate)) {
-            candidate = base + "_" + suffix;
-            suffix++;
+        return base + "_" + shortHash(raw);
+    }
+
+    private String shortHash(String raw) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-1");
+            byte[] bytes = digest.digest(raw.getBytes(StandardCharsets.UTF_8));
+            StringBuilder out = new StringBuilder(8);
+            for (int i = 0; i < 4; i++) {
+                out.append(String.format(Locale.US, "%02x", bytes[i] & 0xff));
+            }
+            return out.toString();
+        } catch (Exception ignored) {
+            return Integer.toHexString(raw.hashCode());
         }
-        return candidate;
+    }
+
+    private boolean isUsable(File file) {
+        return file.isFile() && file.length() > 0L;
+    }
+
+    private boolean copyFile(File source, File destination) {
+        try {
+            File parent = destination.getParentFile();
+            if (parent != null) {
+                parent.mkdirs();
+            }
+            Files.copy(source.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING);
+            return isUsable(destination);
+        } catch (Exception t) {
+            tinycat.logger.warn("TierList: failed to copy cached image " + source + " -> " + destination, t);
+            return false;
+        }
     }
 
     private void disposeGl() {

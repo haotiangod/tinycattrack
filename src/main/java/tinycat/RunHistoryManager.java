@@ -137,32 +137,40 @@ public class RunHistoryManager {
      * 重新加载全部对局数据（清空缓存后重新扫描磁盘）。
      */
     public void refreshData() {
-        this.allRuns.clear();
-        this.ironcladRuns.clear();
-        this.silentRuns.clear();
-        this.defectRuns.clear();
-        this.watcherRuns.clear();
+        // 不要在批量加载历史 run 时使用“当前这一局”的第0层HP。
+        // capturedFloor0HP 是静态字段，若不隔离，会把当前局HP套到所有历史局上。
+        Integer captured = tinycat.capturedFloor0HP;
+        tinycat.capturedFloor0HP = null;
+        try {
+            this.allRuns.clear();
+            this.ironcladRuns.clear();
+            this.silentRuns.clear();
+            this.defectRuns.clear();
+            this.watcherRuns.clear();
 
-        loadData().forEach((run) -> {
-            switch (run.playerClass) {
-                case IRONCLAD:
-                    this.allRuns.add(run);
-                    this.ironcladRuns.add(run);
-                    break;
-                case THE_SILENT:
-                    this.allRuns.add(run);
-                    this.silentRuns.add(run);
-                    break;
-                case DEFECT:
-                    this.allRuns.add(run);
-                    this.defectRuns.add(run);
-                    break;
-                case WATCHER:
-                    this.allRuns.add(run);
-                    this.watcherRuns.add(run);
-                    break;
-            }
-        });
+            loadData().forEach((run) -> {
+                switch (run.playerClass) {
+                    case IRONCLAD:
+                        this.allRuns.add(run);
+                        this.ironcladRuns.add(run);
+                        break;
+                    case THE_SILENT:
+                        this.allRuns.add(run);
+                        this.silentRuns.add(run);
+                        break;
+                    case DEFECT:
+                        this.allRuns.add(run);
+                        this.defectRuns.add(run);
+                        break;
+                    case WATCHER:
+                        this.allRuns.add(run);
+                        this.watcherRuns.add(run);
+                        break;
+                }
+            });
+        } finally {
+            tinycat.capturedFloor0HP = captured;
+        }
 
         tinycat.logger.info("Loaded " + this.allRuns.size() + " runs.");
         tinycat.logger.info("Loaded " + this.ironcladRuns.size() + " ironclad runs.");

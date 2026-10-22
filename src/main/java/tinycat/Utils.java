@@ -6,9 +6,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.math.BigDecimal;
-import java.math.MathContext;
-import java.util.HashMap;
-import java.util.Map;
+import java.math.RoundingMode;
 
 /**
  * 通用工具类，提供反射操作、数学计算、卡牌名称标准化等辅助功能。
@@ -18,35 +16,9 @@ import java.util.Map;
  * - 数学工具：calculatePercent（百分比计算）/ round（四舍五入）
  * - 卡牌工具：normalizeCardName（名称标准化）/ cardUpgrade*（升级辅助）
  * 
- * 卡牌名称映射表：处理游戏版本更新导致的名称变更（如 Adaptation -> Rushdown）
+ * 卡牌名称映射统一由 {@link CardNameNormalizer} 维护。
  */
 public class Utils {
-    /** 卡牌名称标准化映射表，处理游戏版本更新导致的名称变更 */
-    private static final Map<String, String> CARD_NAME_REPLACEMENTS = new HashMap<String, String>() {{
-        put("Lockon", "Bullseye");
-        put("Steam", "Steam Barrier");
-        put("Steam Power", "Overclock");
-        put("Redo", "Recursion");
-        put("Undo", "Equilibrium");
-        put("Gash", "Claw");
-        put("Venomology", "Alchemize");
-        put("Night Terror", "Nightmare");
-        put("NightTerror", "Nightmare");
-        put("Crippling Poison", "Crippling Cloud");
-        put("CripplingPoison", "Crippling Cloud");
-        put("Underhanded Strike", "Sneaky Strike");
-        put("UnderhandedStrike", "Sneaky Strike");
-        put("Clear The Mind", "Tranquility");
-        put("ClearTheMind", "Tranquility");
-        put("Wireheading", "Foresight");
-        put("Vengeance", "Simmering Fury");
-        put("Adaptation", "Rushdown");
-        put("Path to Victory", "Pressure Points");
-        put("PathToVictory", "Pressure Points");
-        put("Ghostly", "Apparition");
-        put("Yang", "Duality");
-        put("Snake Skull", "Snecko Skull");
-    }};
 
     /**
      * 通过反射调用私有方法。
@@ -138,8 +110,11 @@ public class Utils {
      * @return 四舍五入后的值
      */
     public static double round(double value, int places) {
-        BigDecimal bd = new BigDecimal(value);
-        bd = bd.round(new MathContext(places));
+        if (Double.isNaN(value) || Double.isInfinite(value)) {
+            return value;
+        }
+        BigDecimal bd = BigDecimal.valueOf(value);
+        bd = bd.setScale(places, RoundingMode.HALF_UP);
         return bd.doubleValue();
     }
 
@@ -149,7 +124,7 @@ public class Utils {
      */
     public static String normalizeCardName(String s) {
         String normal = s.split("\\+")[0];
-        return CARD_NAME_REPLACEMENTS.getOrDefault(normal, normal);
+        return CardNameNormalizer.normalize(normal);
     }
 
     /** 调用卡牌的 upgradeName() 私有方法 */

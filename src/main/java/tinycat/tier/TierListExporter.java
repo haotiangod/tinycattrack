@@ -75,7 +75,9 @@ public final class TierListExporter {
         }
 
         File imagesDir = new File(root, "images");
-        TierImageExporter imageExporter = new TierImageExporter(imagesDir);
+        File cacheDir = new File(exportRoot, "cache/v1");
+        TierImageExporter imageExporter = new TierImageExporter(imagesDir, cacheDir);
+        ensureCacheReadme(cacheDir);
         try {
             for (TierListGroup group : model.groups) {
                 for (TierEntry entry : group.entries) {
@@ -84,6 +86,11 @@ public final class TierListExporter {
             }
             writeCsv(model, new File(root, "data.csv"));
             writeJson(model, new File(root, "data.json"));
+            try {
+                TierListImageRenderer.write(model, root);
+            } catch (Exception t) {
+                tinycat.logger.warn("TierList: failed to render shareable image", t);
+            }
             writeHtml(model, new File(root, "tierlist.html"));
             writeReadme(model, new File(root, "README.txt"));
         } finally {
@@ -289,7 +296,14 @@ public final class TierListExporter {
         html.append("<b>Images / 图片：</b> all images are extracted from the local game at runtime (CardLibrary / RelicLibrary); SKIP and missing images use a locally generated placeholder. No network or external image source. ");
         html.append("图片全部来自本地游戏内存（CardLibrary / RelicLibrary），SKIP 和缺失图使用本地生成的占位图；不访问网络、不依赖外部图源。\n");
         html.append("</div>\n");
-        html.append("<div class=\"links\"><a href=\"data.csv\">data.csv</a><a href=\"data.json\">data.json</a><a href=\"README.txt\">README.txt</a></div>\n");
+        html.append("<div class=\"links\">");
+        if (new File(file.getParentFile(), "tierlist.jpg").isFile()) {
+            html.append("<a href=\"tierlist.jpg\">tierlist.jpg</a>");
+        }
+        if (new File(file.getParentFile(), "tierlist.png").isFile()) {
+            html.append("<a href=\"tierlist.png\">tierlist.png</a>");
+        }
+        html.append("<a href=\"data.csv\">data.csv</a><a href=\"data.json\">data.json</a><a href=\"README.txt\">README.txt</a></div>\n");
 
         for (TierListGroup group : model.groups) {
             html.append("<section class=\"group\">\n");
@@ -357,6 +371,8 @@ public final class TierListExporter {
         text.append("data.csv      - one row per entry, UTF-8 with BOM (Excel friendly)\n");
         text.append("data.json     - structured data with tier/group metadata\n");
         text.append("tierlist.html - self-contained visual tier list (open in any browser)\n");
+        text.append("tierlist.jpg  - shareable full tier-list image (JPEG)\n");
+        text.append("tierlist.png  - shareable full tier-list image (lossless PNG)\n");
         text.append("images/       - card portraits, boss relic icons, SKIP placeholder\n");
         text.append("README.txt    - this file\n\n");
 
@@ -475,6 +491,22 @@ public final class TierListExporter {
 
     private static boolean ensureDir(File dir) {
         return dir.isDirectory() ? dir.canWrite() : dir.mkdirs();
+    }
+
+    private static void ensureCacheReadme(File cacheDir) throws IOException {
+        File readme = new File(cacheDir, "README.txt");
+        if (readme.isFile() && readme.length() > 0L) {
+            return;
+        }
+        writeString(readme,
+                "TinyCat image cache\n"
+                        + "==================\n\n"
+                        + "This folder is a persistent cache shared by all Tier List exports.\n"
+                        + "It avoids re-extracting the same card/relic image on every export.\n\n"
+                        + "It is NOT included in the export zip. Deleting this folder is safe;\n"
+                        + "the next export will rebuild it.\n"
+                        + "If you updated the game or a card/relic mod and see stale images,\n"
+                        + "delete this cache folder and export again.\n");
     }
 
     private static void zipDirectory(File root, File zipFile) throws IOException {
