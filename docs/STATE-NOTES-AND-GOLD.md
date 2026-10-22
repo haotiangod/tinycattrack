@@ -26,9 +26,9 @@ StateNotes 的逐回合快照只能看到“当前金币”，无法单独还原
 
 原计划中的“联系上游作者”“无许可证时绕过 save 类 Mod”均不再需要。
 
-## 3. TinyCat 的实现
+## 3. 实现（4.1.1：主 Mod 只读，测试 Mod 写入）
 
-`RunStateTracker` 实现 `PostDungeonUpdateSubscriber`，每帧检查，仅在楼层或 `goldGained` 变化时写文件：
+主 TinyCat 不订阅 `PostDungeonUpdate`、不写任何状态文件；精确状态由独立的 `TinyCatTrackerTest` 测试 Mod 生成。测试 Mod 实现 `PostDungeonUpdateSubscriber`，每帧检查，仅在楼层或 `goldGained` 变化时写文件：
 
 ```text
 runs/{runDir}/{start_ts}.tinycat
@@ -47,6 +47,8 @@ updated_ts=<最后写入 Unix 秒>
 - 楼层刷新后，用 `now - playtime` 在 1 小时窗口内寻找最近的 `.tinycat` 重新挂接，避免重复创建。
 - `Run` 加载历史时，用 `updated_ts` 与 `.run` 结束时间匹配（6 小时窗口，要求 `start_ts <= 结束时间`）。
 - 没有状态文件时回退到原有估算，并保留 `goldEstimated` / `floor0HPEstimated` 标记。
+- 主 TinyCat 只在发现 `.tinycat` 时读取；普通安装不会生成文件，也不会与其它 Mod 争抢写入。
+- 测试 Mod 与主 Mod 的 modid 不同，可同时安装。构建：`gradle buildTrackerTestJAR`，产物 `build/libs/TinyCatTrackerTest_V0.1.0.jar`。
 
 ## 4. 金币估算准确度
 
@@ -60,12 +62,13 @@ updated_ts=<最后写入 Unix 秒>
 | 最大绝对误差 | 160 |
 | 带符号平均误差 | -2.5 |
 
-估算器系统偏差很小，但单局误差可达 160，因此新对局应优先使用 `.tinycat` 的精确值。
+估算器系统偏差很小，但单局误差可达 160，因此装了测试 Mod 的新对局应优先使用 `.tinycat` 的精确值。
 
-验证脚本：`python scripts/validate_gold_estimate.py`。
+验证脚本：`python scripts/validate_gold_estimate.py`。脚本还会按实际 Boss 楼层统计每幕范围，并审计宝箱层/Boss 后过渡层上是否仍有战斗或事件。
 
 ## 5. 分发边界
 
-- TinyCat 不新增任何 StateNotes/STSStateSaver 编译依赖。
-- 不复制 `savestate` 包，不在导出包中包含其 JAR 或代码。
+- 主 TinyCat 不新增任何 StateNotes/STSStateSaver 编译依赖，主 JAR 不包含状态追踪代码。
+- 测试 Mod `TinyCatTrackerTest` 是本项目自有代码，仅写入 `.tinycat`，不引用 `savestate` 包。
+- 不复制 `savestate` 包，不在主 JAR、测试 JAR 或导出包中包含其代码。
 - `.tinycat` 是 TinyCat 自己生成的纯文本文件，不包含第三方代码。

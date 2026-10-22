@@ -1,22 +1,21 @@
 # TinyCat 数据流与统计口径
 
-> 描述当前 4.1.0 的实际逻辑，便于核对统计结果。
-> 代码位置以 `src/main/java/tinycat/` 为准。
+> 描述当前 4.1.1 的实际逻辑，便于核对统计结果。
+> 代码位置以 `src/main/java/tinycat/` 为准；测试 Mod 在 `tracker-test/`。
 
 ## 1. 从游戏到统计界面
 
 ```text
-游戏事件
-  → tinycat.java 订阅 BaseMod 事件
-  → RunStateTracker 每帧写 .tinycat（第 1 层 HP / 累计金币）
-  → RunHistoryPlus 写出 .run JSON
+RunHistoryPlus 写出 .run JSON
   → RunHistoryManager 批量读取
-  → Run 合并 .tinycat + 解析 .run
+  → Run 读取可选 .tinycat（仅由独立测试 Mod 写入）+ 解析 .run
   → Run.valid() 过滤
   → ClassStat 聚合
   → MoreStatsScreen / StatsScreenPatch 渲染
   → TierListBuilder / TierImageExporter / TierListExporter 导出
 ```
+
+`TinyCatTrackerTest` 是独立测试 Mod，不在主 JAR 内；它订阅 `PostDungeonUpdate`，只负责写状态文件，不参与统计渲染。
 
 ### tinycat.java
 
@@ -24,15 +23,16 @@
 - 构造时创建 `Config`，`BaseMod.subscribe(this)`。
 - `initialize()`：加载 `Localization`、`NameMapper`。
 - `PostInitialize`：创建 `RunHistoryManager`，注册 badge 与设置面板。
-- `PostDungeonUpdate`：每帧调用 `RunStateTracker.update()`。
+- 主 Mod 不订阅 `PostDungeonUpdate`，也不写 `.tinycat`。
 
-### RunStateTracker
+### TinyCatTrackerTest（可选）
 
 - 文件：`runs/{runDir}/{start_ts}.tinycat`，key=value 纯文本。
 - `runDir` 与 RunHistoryPlus 一致：默认存档位为角色名，其他存档位为 `{slot}_{角色名}`。
 - 只在楼层或 `CardCrawlGame.goldGained` 变化时写文件，避免每帧 IO。
 - 进入第 1 层且 `playtime < 300` 时记录 `floor0_hp` 和 `start_gold`；读档续玩不重复记录。
 - 楼层刷新后，按 `now - playtime` 在 1 小时窗口内寻找最近的 `.tinycat` 重新挂接。
+- 构建：`gradle buildTrackerTestJAR`；与主 Mod 同时放入 `mods/` 即可。
 
 ### RunHistoryManager
 
@@ -61,6 +61,14 @@
 - 其余为第四幕。
 - 缺少 Boss 数据时回退 `<=17 / <=34 / <=52`；传送门路线用 `portalFloor` 特殊处理。
 - Mind Bloom 的 Boss 战在数据中名为 `"Mind Bloom Boss Battle"`，不会干扰识别。
+
+战损统计使用 `Run.getActForStats(floor)`：
+
+- `path_per_floor` 为 `T` 的宝箱层返回 0，调用方跳过；
+- 各幕 Boss 的下一层是奖励/过渡层，也返回 0；
+- 其余返回 `getAct(floor)`。
+
+因此每幕统计范围是“捏奥之后 ~ 本幕 Boss”：第一幕第 1 层到第一幕 Boss，第二幕从第一幕 Boss 后开始，依此类推。`getLastActForStats()` 从 `floorsReached` 向前跳过奖励层，用于死亡幕归属。
 
 真实数据（1,113 局）分布：
 
@@ -108,7 +116,7 @@ Tier 导出复用这两组数据：`Singing Bowl` 并入 `SKIP`，剔除 `CURSE/
 
 `Run.getFloor0HP()`：
 
-1. `.tinycat` 的 `floor0_hp`（精确，需开局第 1 层 300 秒内记录）。
+1. `.tinycat` 的 `floor0_hp`（由测试 Mod 精确记录，需开局第 1 层 300 秒内写入）。
 2. 估算：`floor1HP + floor1Damage`；Ironclad 再减 6（Burning Blood）。
 3. `max_hp_per_floor[0]`。
 4. 兜底 70。
@@ -134,11 +142,13 @@ actualHPLoss = hpBefore - hpAfter
 - 每幕总战损；
 - 战斗与事件分开统计。
 
+战损按 `getActForStats` 跳过宝箱层与 Boss 后奖励/过渡层。每幕总战损是各战斗与事件净损失之和，篝火等回血没有对应条目、不会被抵减，因此它表示“本幕累计受到的伤害”，不等于“本幕开场 HP − Boss 后 HP”。
+
 ## 6. 金币
 
 `Run.parseGold()`：
 
-1. `.tinycat` 的 `gold_gained`（`CardCrawlGame.goldGained`，精确累计获得金币）。
+1. `.tinycat` 的 `gold_gained`（由测试 Mod 从 `CardCrawlGame.goldGained` 写入，精确累计获得金币）；主 Mod 只读，不生成文件。
 2. 没有状态文件时用 `gold_per_floor` 估算：
    - 第一层金币 - Neow 扣除常数；
    - 后续正增量；

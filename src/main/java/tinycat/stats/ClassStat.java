@@ -434,7 +434,10 @@ public class ClassStat {
                 if (es.enemies.equals("Gremlin Nob")) {
                     nob.win++;
                 }
-                int act = run.getAct(es.floor);
+                int act = run.getActForStats(es.floor);
+                if (act == 0) {
+                    continue;
+                }
                 int potsUsed = es.potionsUsed;
                 if (potsUsed >= 0) {
                     encounterPotionUseMap.get(act).putIfAbsent(es.enemies, new Mean(es.enemies));
@@ -510,7 +513,7 @@ public class ClassStat {
                     nob.win--;
                     nob.loss++;
                 }
-                int act = run.getAct(run.floorsReached);
+                int act = run.getLastActForStats();
                 Rate<String> k = encounterDeadRate.getOrDefault(act, new HashMap<>()).get(killedBy);
                 if (k != null) {
                     k.win++;
@@ -565,7 +568,10 @@ public class ClassStat {
             }
 
             int floor = run.floorsReached;
-            int act = run.getAct(floor);
+            int act = run.getActForStats(floor);
+            if (act == 0) {
+                return;
+            }
 
             switch (act) {
                 case 1:
@@ -622,18 +628,27 @@ public class ClassStat {
                 if (es == null || es.enemies == null || es.enemies.startsWith("事件:")) {
                     continue;
                 }
-                runAllHPLossSum.merge(run.getAct(es.floor), (double) es.actualHPLoss, Double::sum);
+                int act = run.getActForStats(es.floor);
+                if (act == 0) {
+                    continue;
+                }
+                runAllHPLossSum.merge(act, (double) es.actualHPLoss, Double::sum);
             }
             if (run.eventStats != null) {
                 for (com.megacrit.cardcrawl.screens.stats.EventStats event : run.eventStats) {
                     if (event.damage_taken > 0) {
-                        runAllHPLossSum.merge(run.getAct(event.floor), (double) event.damage_taken, Double::sum);
+                        int act = run.getActForStats(event.floor);
+                        if (act == 0) {
+                            continue;
+                        }
+                        runAllHPLossSum.merge(act, (double) event.damage_taken, Double::sum);
                     }
                 }
             }
             // 每幕总战损按“每局每幕一个样本”统计；没有战损的幕也要记 0，
             // 否则平均值只会包含发生过战损的对局，结果会偏高。
-            int lastAct = Math.min(4, Math.max(1, run.getAct(Math.max(1, run.floorsReached))));
+            // Boss 后的奖励/宝箱层不算进入下一幕。
+            int lastAct = run.getLastActForStats();
             for (int act = 1; act <= lastAct; act++) {
                 runAllHPLossSum.putIfAbsent(act, 0.0D);
             }
@@ -652,7 +667,10 @@ public class ClassStat {
             Map<Integer, Double> runEventSum = new HashMap<>();
             
             for (com.megacrit.cardcrawl.screens.stats.EventStats e : run.eventStats) {
-                int act = run.getAct(e.floor);
+                int act = run.getActForStats(e.floor);
+                if (act == 0) {
+                    continue;
+                }
                 String event = e.event_name;
                 Map<String, Rate<String>> m = eventWinRate.get(act);
                 if (m == null) continue;

@@ -510,7 +510,7 @@ public class Run implements Comparable<Run> {
     }
 
     /**
-     * 读取 runs/{runDir}/{start}.tinycat。
+     * 读取 runs/{runDir}/{start}.tinycat（由 TinyCatTrackerTest 测试模组写入）。
      * 文件按“最后一次更新时间”与本局结束时间最接近来匹配，
      * 这样中途退出再继续的对局也能对上同一条记录。
      */
@@ -598,7 +598,7 @@ public class Run implements Comparable<Run> {
 
     /**
      * 第 1 层开始前的 HP（Neow 结束后）。
-     * 优先使用 TinyCat 的 .tinycat 记录，缺失时按第 1 层受到伤害反推。
+     * 优先使用 TinyCatTrackerTest 写的 .tinycat 记录，缺失时按第 1 层受到伤害反推。
      */
     private int getFloor0HP() {
         if (trackedFloor0HP > 0) {
@@ -850,6 +850,39 @@ public class Run implements Comparable<Run> {
             return 3;
         }
         return 4;
+    }
+
+    /**
+     * 宝箱层，以及 Boss 后的奖励/过渡层。这些楼层不属于战损统计范围，
+     * 否则会把 Boss 后的回血或宝箱效果算到下一幕。
+     */
+    public boolean isRewardFloor(int floor) {
+        if (floor <= 0) {
+            return false;
+        }
+        if ((act1BossFloor > 0 && floor == act1BossFloor + 1)
+                || (act2BossFloor > 0 && floor == act2BossFloor + 1)
+                || (act3BossFloor > 0 && floor == act3BossFloor + 1)) {
+            return true;
+        }
+        if (runData.path_per_floor != null && floor <= runData.path_per_floor.size()) {
+            return "T".equals(runData.path_per_floor.get(floor - 1));
+        }
+        return false;
+    }
+
+    /** 战损统计用幕号；奖励/过渡层返回 0，调用方应跳过。 */
+    public int getActForStats(int floor) {
+        return isRewardFloor(floor) ? 0 : getAct(floor);
+    }
+
+    /** 本局实际到过的最后一幕，忽略 Boss 后的奖励/过渡层。 */
+    public int getLastActForStats() {
+        int floor = Math.max(1, floorsReached);
+        while (floor > 1 && isRewardFloor(floor)) {
+            floor--;
+        }
+        return Math.min(4, Math.max(1, getAct(floor)));
     }
     
     /**

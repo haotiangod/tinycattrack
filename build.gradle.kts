@@ -40,7 +40,7 @@ var stsJar: String = "$stsInstallLocation/desktop-1.0.jar"
 var modName: String = rootProject.name
 
 // 自定义版本号，每次测试时修改此处
-var versionTag: String = "V4.1.0"
+var versionTag: String = "V4.1.1"
 
 // JAR 文件命名：使用 ModTheSpire.json 中的 modid
 var jarBaseName: String = "TinyCat"
@@ -65,6 +65,12 @@ sourceSets {
             srcDirs("src/main/resources", "location")
         }
     }
+    // 独立测试模组：记录金币/HP，不打包进 TinyCat 正式版
+    create("trackerTest") {
+        java.srcDir("tracker-test/src/main/java")
+        resources.srcDir("tracker-test/src/main/resources")
+        compileClasspath += sourceSets.main.get().compileClasspath
+    }
 }
 
 // 设置资源文件的重复处理策略
@@ -88,7 +94,7 @@ tasks.register<Jar>("buildJAR") {
     group = "Slay the Spire"
     description = "Builds a fat (includes runtime dependencies) JAR in the build/libs folder"
 
-    // 设置输出 JAR 文件名：TinyCat_V4.1.0.jar
+    // 设置输出 JAR 文件名：TinyCat_V4.1.1.jar
     archiveFileName.set("${jarBaseName}_${versionTag}.jar")
 
     // Main code
@@ -103,6 +109,14 @@ tasks.register<Jar>("buildJAR") {
             zipTree(it)
         }
     })
+}
+
+tasks.register<Jar>("buildTrackerTestJAR") {
+    group = "Slay the Spire"
+    description = "Builds the optional TinyCat tracker test mod JAR"
+
+    archiveFileName.set("TinyCatTrackerTest_V0.1.0.jar")
+    from(sourceSets["trackerTest"].output)
 }
 
 tasks.register<Copy>("buildAndCopyJAR") {

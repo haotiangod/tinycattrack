@@ -9,13 +9,18 @@ TinyCat 金币/首层 HP 与每幕楼层归属校验。
 
 数据来源:
 - runs/{角色}/*.run          RunHistoryPlus 对局记录
-- runs/{角色}/*.tinycat      TinyCat 自行记录的状态（v4.1.0+）
+- runs/{角色}/*.tinycat      独立的 TinyCatTrackerTest 测试 Mod 记录的状态；
+                             主 TinyCat 4.1.1 只读不写，缺失时正常回退估算
 
 精确金币:
 少数 .run 的 score_breakdown 会记录金币成就的实际数值，例如
   好多好多钱 (1178): 25
   下钱雨啦 (2015): 50
 该数值就是本局累计获得金币，可用于校验估算公式。
+
+战损校验:
+按 damage_taken 中识别出的实际 Boss 楼层划分每幕，跳过 path_per_floor 为 "T"
+的宝箱层及 Boss 后一层的奖励/过渡层，并输出仍落在这些楼层的战斗/事件数量。
 
 用法:
   python scripts/validate_gold_estimate.py
@@ -129,6 +134,17 @@ def act_of(floor, act1, act2, act3):
     return 4
 
 
+def reward_floors(j, act1, act2, act3):
+    floors = set()
+    for boss in (act1, act2, act3):
+        if boss:
+            floors.add(boss + 1)
+    for index, node in enumerate(j.get("path_per_floor") or [], 1):
+        if node == "T":
+            floors.add(index)
+    return floors
+
+
 def read_tinycat(path):
     state = {}
     try:
@@ -196,6 +212,9 @@ def main():
     act_boss_floors = {1: Counter(), 2: Counter(), 3: Counter()}
     boss_errors = []
     changed_floors = Counter()
+    reward_battle = Counter()
+    reward_event = Counter()
+    ended_on_reward = Counter()
 
     for path in glob.glob(os.path.join(args.runs, "*", "*.run")):
         j = read_json(path)
@@ -210,11 +229,18 @@ def main():
         if act3:
             act_boss_floors[3][act3] += 1
 
+        reward = reward_floors(j, act1, act2, act3)
+        if int(j.get("floor_reached", 0)) in reward:
+            ended_on_reward[(j.get("victory"), j.get("killed_by"))] += 1
+
         for battle in j.get("damage_taken") or []:
             floor = int(battle["floor"])
+            if floor in reward:
+                reward_battle[(floor, battle.get("enemies"))] += 1
             act = act_of(floor, act1, act2, act3)
-            act_ranges[act][0] = min(act_ranges[act][0], floor)
-            act_ranges[act][1] = max(act_ranges[act][1], floor)
+            if floor not in reward:
+                act_ranges[act][0] = min(act_ranges[act][0], floor)
+                act_ranges[act][1] = max(act_ranges[act][1], floor)
             old_act = 1 if floor <= 17 else 2 if floor <= 34 else 3 if floor <= 52 else 4
             if old_act != act:
                 changed_floors[(battle.get("enemies"), old_act, act)] += 1
@@ -222,6 +248,11 @@ def main():
             expected = 1 if name in ACT1_BOSSES else 2 if name in ACT2_BOSSES else 3 if name in ACT3_BOSSES else None
             if expected and expected != act:
                 boss_errors.append((os.path.basename(path), name, floor, act1, act2, act3, act))
+
+        for event in j.get("event_choices") or []:
+            floor = int(event.get("floor", 0))
+            if floor in reward:
+                reward_event[event.get("event_name")] += 1
 
         exact = exact_gold(j)
         estimate = estimate_gold(j)
@@ -291,6 +322,11 @@ def main():
     print("  floors reclassified vs old 17/34/52 thresholds:", sum(changed_floors.values()))
     for key, count in changed_floors.most_common(10):
         print("   ", key, count)
+
+    print("\nreward/transition floor audit:")
+    print("  battles on reward floors:", sum(reward_battle.values()), dict(reward_battle.most_common(5)))
+    print("  events on reward floors:", sum(reward_event.values()), dict(reward_event.most_common(5)))
+    print("  runs ended on reward floor:", sum(ended_on_reward.values()), dict(ended_on_reward))
 
     if args.csv:
         with open(args.csv, "w", newline="", encoding="utf-8-sig") as handle:

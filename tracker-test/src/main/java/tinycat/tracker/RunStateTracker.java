@@ -1,4 +1,4 @@
-package tinycat;
+package tinycat.tracker;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.files.FileHandle;
@@ -10,11 +10,10 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * 记录本局第 1 层起始 HP 与累计获得金币，写入
- * runs/{runDir}/{start}.tinycat，供 Run 加载历史数据时精确读取。
+ * 测试模组使用的局内状态记录器。
  *
- * 文件一边写一边覆盖，只保留最终状态；金币来自 CardCrawlGame.goldGained，
- * 不依赖 StateNotes 等外部模组。
+ * 写入 runs/{runDir}/{start}.tinycat，记录第 1 层 HP 与累计获得金币。
+ * TinyCat 正式版只读取该文件，不会主动创建。
  */
 public final class RunStateTracker {
     private static final String VERSION = "1";
@@ -66,7 +65,7 @@ public final class RunStateTracker {
             active = true;
             lastFloor = -1;
             lastGoldGained = -1;
-            tinycat.logger.info("RunStateTracker reattached: " + existing.path());
+            TinyCatTrackerTest.logger.info("RunStateTracker reattached: " + existing.path());
             return true;
         }
 
@@ -83,7 +82,7 @@ public final class RunStateTracker {
         active = true;
         lastFloor = -1;
         lastGoldGained = -1;
-        tinycat.logger.info("RunStateTracker started: " + file.path());
+        TinyCatTrackerTest.logger.info("RunStateTracker started: " + file.path());
         return true;
     }
 
@@ -133,7 +132,7 @@ public final class RunStateTracker {
                 }
             }
         } catch (Exception e) {
-            tinycat.logger.warn("RunStateTracker failed to read " + source.path(), e);
+            TinyCatTrackerTest.logger.warn("RunStateTracker failed to read " + source.path(), e);
         }
         state.put("version", VERSION);
     }
@@ -146,7 +145,7 @@ public final class RunStateTracker {
             }
             file.writeString(text.toString(), false);
         } catch (Exception e) {
-            tinycat.logger.warn("RunStateTracker failed to write " + file.path(), e);
+            TinyCatTrackerTest.logger.warn("RunStateTracker failed to write " + file.path(), e);
         }
     }
 

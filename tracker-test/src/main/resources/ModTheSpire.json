@@ -1,0 +1,14 @@
+{
+  "modid": "TinyCatTrackerTest",
+  "name": "TinyCat Tracker Test",
+  "author_list": [
+    "tinycat"
+  ],
+  "description": "Test-only tracker for TinyCat gold and floor-1 HP calibration",
+  "version": "0.1.0",
+  "sts_version": "07-30-2020",
+  "mts_version": "3.15.0",
+  "dependencies": [
+    "basemod"
+  ]
+}

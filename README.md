@@ -11,7 +11,7 @@
 | 项目 | 内容 |
 |------|------|
 | ModID | `TinyCat` |
-| 版本 | 4.1.0 |
+| 版本 | 4.1.1 |
 | 作者 | tinycat |
 | 依赖 | BaseMod, RunHistoryPlus |
 | 许可证 | MPL-2.0 |
@@ -26,7 +26,6 @@
 tinycat/
 ├── src/main/java/tinycat/
 │   ├── tinycat.java              # 模组入口，生命周期与事件订阅
-│   ├── RunStateTracker.java      # 局内状态追踪（第 1 层 HP、累计金币）
 │   ├── Config.java               # SpireConfig 配置
 │   ├── Localization.java         # 中/英文本地化
 │   ├── LocalizationKeys.java     # 本地化键
@@ -54,6 +53,11 @@ tinycat/
 ├── src/main/resources/
 │   ├── tinycat/img/
 │   └── ModTheSpire.json
+├── tracker-test/                 # 独立测试 Mod，不在主 JAR 内
+│   ├── src/main/java/tinycat/tracker/
+│   │   ├── TinyCatTrackerTest.java
+│   │   └── RunStateTracker.java  # 写 .tinycat，仅用于校准
+│   └── src/main/resources/ModTheSpire.json
 ├── location/
 │   ├── uilocalization/           # strings.json / strings-zh.json
 │   └── chinese_english_mapping.json
@@ -93,9 +97,11 @@ tinycat/
 
 ---
 
-## 第 0 层 HP 与金币追踪
+## 第 0 层 HP 与金币追踪（可选测试版）
 
-TinyCat 自己记录状态，写入 `runs/{runDir}/{start_ts}.tinycat`（key=value）：
+主 TinyCat 4.1.1 **不写任何状态文件**，只在对局目录发现 `.tinycat` 时读取；没有就回退估算。这样普通安装不会在后台产生额外文件，也不会与其它 Mod 争抢写入。
+
+精确值由独立的测试 Mod `TinyCatTrackerTest` 生成，写入 `runs/{runDir}/{start_ts}.tinycat`（key=value）：
 
 ```text
 version=1
@@ -109,7 +115,7 @@ floor=...
 updated_ts=...
 ```
 
-- 由 `PostDungeonUpdateSubscriber` 每帧检查，仅在楼层或累计金币变化时覆写，开销很小。
+- 测试 Mod 由 `PostDungeonUpdateSubscriber` 每帧检查，仅在楼层或累计金币变化时覆写。
 - 楼层刷新（读档）后按 `now - playtime` 寻找 1 小时内最近的 `.tinycat` 重新挂接。
 - `Run` 加载历史时，用“与 `.run` 结束时间最接近的 `updated_ts`（6 小时内，且 `start_ts` 不晚于结束时间）”匹配状态文件。
 - 有状态文件时，第 1 层 HP 与累计金币为精确值，不再标记估算。
@@ -117,6 +123,15 @@ updated_ts=...
   - 第 1 层 HP：Ironclad `floor1HP + floor1Damage - 6`，其他角色 `+0`。
   - 累计金币：`gold_per_floor` 正增量 + Neow 扣除修正 + MawBank。
   - UI/CSV 会标注估算。
+- 测试 Mod 与主 Mod 的 modid 不同，可以同时安装；不装测试 Mod 时，主 Mod 的行为与普通统计完全一致。
+
+### 测试 Mod 的构建与使用
+
+```bash
+gradle buildTrackerTestJAR
+```
+
+产物 `build/libs/TinyCatTrackerTest_V0.1.0.jar`。把它和 `TinyCat_V4.1.1.jar` 一起放入 `mods/`，打几局后运行校验脚本，即可对照状态文件与分数明细。测试 Mod 只写状态，不参与统计界面渲染。
 
 ### 金币估算准确度
 
@@ -134,18 +149,21 @@ updated_ts=...
 
 ---
 
-## 战损统计的幕划分
+## 战损统计的幕划分与楼层范围
 
-幕边界不是固定楼层，而是从 `damage_taken` 中识别各幕 Boss 的实际楼层：
+幕边界不是固定楼层，而是从 `damage_taken` 中识别各幕 Boss 的实际楼层。统计口径是“捏奥之后 → 本幕 Boss”，并跳过奖励层：
 
-| 幕 | 范围 | 说明 |
+| 幕 | 统计楼层范围 | 跳过 |
 |---|---|---|
-| 第一幕 | 第 1 层 ~ 第一幕 Boss 所在层 | Boss 通常 16，异变路线可能 17 |
-| 第二幕 | Boss 下一层 ~ 第二幕 Boss 所在层 | 通常 33，可能 34 |
-| 第三幕 | Boss 下一层 ~ 最后一个第三幕 Boss 所在层 | 通常 50/51，可能 52/53 |
-| 第四幕 | 第三幕 Boss 之后 | 篝火 53/54、商店 54/55、矛盾 55–58、心脏 56–59 |
+| 第一幕 | 第 1 层 ~ 第一幕 Boss 所在层 | 宝箱层 `T` |
+| 第二幕 | 第一幕 Boss + 1 ~ 第二幕 Boss 所在层 | 第一幕 Boss + 1（奖励/过渡层）、宝箱层 `T` |
+| 第三幕 | 第二幕 Boss + 1 ~ 第三幕 Boss 所在层 | 第二幕 Boss + 1、宝箱层 `T` |
+| 第四幕 | 第三幕 Boss + 1 ~ 结算 | 第三幕 Boss + 1、宝箱层 `T` |
 
 - 识别依据：Boss 名称（Hexaghost / Slime Boss / The Guardian、Automaton / Collector / Champ、Time Eater / Awakened One / Donu and Deca）在 `damage_taken` 中的楼层。
+- 宝箱层由 `path_per_floor` 的 `T` 判定；Boss 后一层固定视为奖励/过渡层。
+- 真实数据审计（1,113 局）：奖励层上的战斗 0 场、事件 0 次，因此该修正不改变现有数字；它的作用是防止 Boss 后的回血/宝箱效果被算进下一幕。
+- “每幕总战损”目前是逐条战斗/事件净 HP 变化之和；篝火休息等回血没有对应战斗条目，不会被抵减。它表示本幕累计受到的伤害，不等于“本幕开场 HP − Boss 后 HP”。
 - 缺少 Boss 数据时回退到旧的 `<=17 / <=34 / <=52` 边界。
 - 传送门（Portal）路线单独处理。
 - 在 1,113 局真实数据上，新算法对 Boss 归属 0 误判；仅 5 条原本被归入第四幕的第三幕 Boss（52/53 层）被纠正。
@@ -167,9 +185,14 @@ build-local.bat
 
 # 或
 gradle buildJAR
+
+# 可选：构建金币/首层 HP 校准用的独立测试 Mod
+gradle buildTrackerTestJAR
 ```
 
-产物：`build/libs/TinyCat_V4.1.0.jar`。
+产物：
+- 主 Mod：`build/libs/TinyCat_V4.1.1.jar`
+- 测试 Mod：`build/libs/TinyCatTrackerTest_V0.1.0.jar`
 
 ### 安装
 将 JAR 放入游戏的 `mods/` 目录。升级前删除旧版本 JAR，避免同时加载两个 TinyCat。
@@ -186,23 +209,30 @@ python scripts/validate_gold_estimate.py
 - 估算金币与分数明细精确值的误差分布；
 - 状态文件匹配情况；
 - 各幕 Boss 楼层分布与实际幕范围；
-- 新旧幕边界算法的差异。
+- 新旧幕边界算法的差异；
+- 奖励/过渡层上仍发生战斗或事件的数量。
 
 ---
 
 ## 已知限制
 
-1. 未生成 `.tinycat` 的旧对局仍使用估算金币与估算第 1 层 HP，UI/CSV 会标注。
-2. 状态文件依赖时间匹配：若在结算界面停留超过 6 小时，可能匹配失败。
-3. 只有第 1 层、游戏时间 300 秒内启动的追踪才会记录 `floor0_hp`；中途读入旧档无法还原开局 HP。
+1. 主 Mod 不生成 `.tinycat`；未安装 `TinyCatTrackerTest` 的对局仍使用估算金币与估算第 1 层 HP，UI/CSV 会标注。
+2. 安装测试 Mod 后，状态文件依赖时间匹配：若在结算界面停留超过 6 小时，可能匹配失败。
+3. 测试 Mod 只在第 1 层、游戏时间 300 秒内记录 `floor0_hp`；中途读入旧档无法还原开局 HP。
 4. Mod 内容仅通过名称是否含 `:` 判断，可能漏判。
 5. `Run.java` 中的卡牌/遗物/敌人黑名单需要随游戏与 Mod 更新手动维护。
 6. 第 1 层 HP 回退算法中 Ironclad 的 Burning Blood 回血 6 为硬编码。
 7. 核心算法目前只有校验脚本，没有 JUnit 单元测试。
+8. “每幕总战损”按战斗/事件条目累加，不含篝火等回血，因此不等于净 HP 差。
 
 ---
 
 ## 更新日志
+
+### v4.1.1
+- 主 Mod 移除 `RunStateTracker` 与帧更新写入；金币/首层 HP 状态改由独立测试 Mod `TinyCatTrackerTest`（`tracker-test/`）生成，主 Mod 仅在发现 `.tinycat` 时只读。
+- 战损统计跳过宝箱层（`path_per_floor = "T"`）与 Boss 后奖励/过渡层；每幕范围按“捏奥 → 本幕 Boss”界定。
+- 校验脚本新增奖励/过渡层战斗与事件审计，文档同步测试 Mod 的构建、安装与校准流程。
 
 ### v4.1.0
 - 新增 `RunStateTracker`：本地记录第 1 层 HP、累计获得金币、当前金币与 HP，不依赖外部 Mod。
