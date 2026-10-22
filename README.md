@@ -16,6 +16,8 @@
 | 依赖 | BaseMod, RunHistoryPlus |
 | 许可证 | MPL-2.0 |
 
+数据流/口径说明见 [docs/DATA-FLOW.md](docs/DATA-FLOW.md)，StateNotes 许可证与金币评估见 [docs/STATE-NOTES-AND-GOLD.md](docs/STATE-NOTES-AND-GOLD.md)。
+
 ---
 
 ## 项目结构
