@@ -1,0 +1,41 @@
+# TinyCat — 项目规则 (Cline)
+
+《杀戮尖塔》本地数据统计 Mod。Java 8 + Gradle 8.0 (Kotlin DSL) + ModTheSpire 生态。
+
+## 环境路径（已配置，勿改）
+
+- JDK 8: `C:\Users\MI\.workbuddy\binaries\jdk\jdk8u504-b01` — **必须用 JDK 8 编译，目标 Java 8 字节码**
+- Gradle 8.0: `C:\Users\MI\.workbuddy\binaries\gradle\gradle-8.0`
+- Python 3.12.10: `C:\Users\MI\.workbuddy\binaries\python\versions\3.12.10\python.exe`
+- 游戏本体: `C:\Program Files (x86)\Steam\steamapps\common\SlayTheSpire`（**C 盘**，不是 D 盘）
+- 依赖 JAR: `C:\Program Files (x86)\Steam\steamapps\workshop\content\646570\<id>\`
+
+构建命令：`gradlew buildJAR` 或双击 `build-local.bat`。产物 `build/libs/TinyCat_V4.0.9.jar`。
+
+## 版本红线
+
+- **v10 = 稳定版（用户在用）。v11 = 有 bug，未安装。**
+- 当前源码标注 4.0.11，属未验证版本。
+- **不要擅自回退或大改稳定逻辑。** 修复请做最小改动。
+
+## 工作流要求
+
+1. **先 Plan 后 Act**：涉及 3 个以上文件的改动，先在 Plan 模式说清方案，我确认后再动手。
+2. **小步提交**：每改完一个文件就展示 diff，不要一次改十几个文件再给我看。
+3. **改完必须验证**：跑 `gradlew buildJAR` 确认编译通过，并把构建结果贴给我。
+4. 说明改了哪个文件、哪几行、为什么。
+
+## 已知 Bug（已定位，未修复）
+
+- **P0** `tinycat.java:50` `capturedFloor0HP` 是 `public static` 且从不重置，`Run.java:510` 把它作为优先级 1 返回 → 批量加载历史时全部对局的第 1 层战损被污染成同一局的值。伴生文件机制也失效（写入用开局时间戳，读取用结束时间戳）。
+- **P1** `ClassStat.java:682` `deckSizeStats` 被塞在 `eventStats()` 末尾，事件数据缺失的局会漏统计；`Run.java:74`/`RunHistoryManager.java:62` 缺判空和 try-catch；`StatsScreenPatch.java:537-552` actNumber 恒传 0 导致问号统计不显示；`ClassStat.java:998 vs 1019` 商店删牌口径不一致。
+- **P2** `ClassStat.java:833` 遗留 `System.out.println`；`MoreStatsScreen.java:148` 无条件计算 5 份 ClassStat；`StatsScreenPatch.java:698` HashMap 每帧重建。
+- **P3** `StatsScreenPatch.java:101` 角色配色硬编码英文，中文客户端失效；`Utils.java:141` `round()` 误用 `MathContext(3)`。
+- **P4** `RunData.orderByTimestampDesc` 字符串比较时间戳；`Utils.getField` 失败时抛 RuntimeException；`getIncrementalRuns` 空列表越界。
+
+## 编码约定
+
+- 目标 **Java 8**：禁用 var、`Stream.toList()`、文本块等 Java 9+ 语法。
+- UI 文案**中英双语**都要加（`strings.json` + `strings-zh.json`）。
+- 新增统计维度必须同步四层：采集(Run) → 聚合(ClassStat) → 渲染(StatsScreenPatch/CharStatRenderer) → 本地化。
+- 注释和日志用中文。不引入新第三方依赖。

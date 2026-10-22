@@ -1,0 +1,44 @@
+[b][url=https://github.com/MaT1g3R/sts-stat-tracker]Source code[/url][/b].
+
+Track additional stats about your runs.
+
+Only A20H, non-seeded, non-custom runs are tracked.
+
+The stats can be viewed at the character statistics screen (Main Menu -> Statistics -> Character Stats).
+
+Features:
+[list]
+
+[*] Nob
+
+[*] Fixed base game character statistics to use data from run history
+
+[*] Card pick rate in act 1 and after act 1
+
+[*] Card win rate
+
+[*] Neow pick/win rate
+
+[*] Boss relic pick/win rate
+
+[*] Encounter average HP loss
+
+[*] Encounter mortality rate
+
+[*] Encounter average potions used
+
+[*] Relic win rate
+
+[*] Relic win rate when purchased
+
+[*] Survival rate per act
+
+[*] Average run time (wins)
+
+[*] Event win rate per act
+
+[*] Meta scaling stats
+
+[/list]
+
+More stats coming soon!

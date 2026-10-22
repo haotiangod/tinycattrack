@@ -1,0 +1,11 @@
+{
+  "steamPublishedID": "3177081814",
+  "title": "StatsTracker",
+  "description": "Additional stats tracking",
+  "visibility": "public",
+  "changeNote": "v3.0.6 - Fix NullPointerException",
+  "tags": [
+    "Utility",
+    "Qol"
+  ]
+}
