@@ -37,7 +37,7 @@ import java.util.zip.ZipOutputStream;
  */
 public final class MonsterTierExporter {
     private static final String EXPORT_ROOT = "monster-tier-export";
-    private static final String MOD_VERSION = "4.2.1";
+    private static final String MOD_VERSION = "4.2.2";
     private static final String WORKBOOK = "怪物危险度.xlsx";
     private static final String[] HEADERS = {
             "梯度", "档内排名", "非Boss总排名", "类型", "中文名", "英文名",
@@ -650,6 +650,8 @@ public final class MonsterTierExporter {
         text.append("  mods/TinyCat/monster-images/Bosses/\n");
         text.append("  mods/TinyCat/monster-images/小怪/\n");
         text.append("  mods/TinyCat/monster-images/精英/\n");
+        text.append("A ready-to-use pack can be generated with scripts/download_monster_images.py\n");
+        text.append("(Huiji wiki, local non-commercial use; encounter aliases are cropped).\n");
         text.append("Images are trimmed, fitted to 256x256 and cached under\n");
         text.append("monster-tier-export/cache/v1/monsters; the cache is not included in this zip.\n");
         text.append("No network request is made. The mod does not bundle this image pack.\n");
@@ -658,6 +660,7 @@ public final class MonsterTierExporter {
         text.append("decode WebP; convert those files to real PNG. Unreadable entries fall back to a\n");
         text.append("placeholder or alternate art (Awakened One uses Unawakened_Form).\n");
         text.append("图片读取顺序：游戏目录 mods/TinyCat/monster-images → monster-images → jar 内资源 → 占位图。\n");
+        text.append("可用 scripts/download_monster_images.py 生成图包；遭遇别名默认裁掉标题与稀有度徽章。\n");
         text.append("注意：部分图包的 .png 实际是 WebP，Java 8 无法解码；请转换为真正的 PNG，\n");
         text.append("否则该条目会使用占位图或备用形态（觉醒者回退到未觉醒形态）。\n");
         text.append("图片包不随模组分发；请确认外部图源的使用授权。\n\n");

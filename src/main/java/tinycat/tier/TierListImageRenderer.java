@@ -65,7 +65,7 @@ public final class TierListImageRenderer {
             }
             g.setColor(MUTED);
             g.setFont(font(12, Font.PLAIN));
-            g.drawString("TinyCat 4.2.1 · local export · no external image source", PAD, height - 24);
+            g.drawString("TinyCat 4.2.2 · local export · no external image source", PAD, height - 24);
         } finally {
             g.dispose();
         }

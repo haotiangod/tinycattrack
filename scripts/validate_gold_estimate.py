@@ -10,7 +10,7 @@ TinyCat 金币/首层 HP 与每幕楼层归属校验。
 数据来源:
 - runs/{角色}/*.run          RunHistoryPlus 对局记录
 - runs/{角色}/*.tinycat      独立的 TinyCatTrackerTest 测试 Mod 记录的状态；
-                             主 TinyCat 4.2.1 只读不写，缺失时正常回退估算
+                             主 TinyCat 4.2.2 只读不写，缺失时正常回退估算
 
 精确金币:
 少数 .run 的 score_breakdown 会记录金币成就的实际数值，例如

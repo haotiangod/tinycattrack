@@ -169,15 +169,16 @@ public final class MonsterImageLibrary {
     }
 
     private List<Source> resolve(MonsterTierEntry entry) {
-        String[] keys = IMAGE_FILES.get(entry.id);
-        if (keys == null) {
-            keys = new String[]{entry.nameEn};
+        // 新图包以英文遭遇名存放别名，优先使用；IMAGE_FILES 仅兼容旧图包文件名。
+        List<Source> sources = new ArrayList<Source>();
+        Source primary = resolveOne(entry.nameEn);
+        if (primary != null) {
+            sources.add(primary);
         }
-        List<Source> sources = resolveKeys(keys);
         if (sources.isEmpty()) {
-            Source fallback = resolveOne(entry.nameEn);
-            if (fallback != null) {
-                sources.add(fallback);
+            String[] keys = IMAGE_FILES.get(entry.id);
+            if (keys != null) {
+                sources = resolveKeys(keys);
             }
         }
         return sources;

@@ -11,7 +11,7 @@
 | 项目 | 内容 |
 |------|------|
 | ModID | `TinyCat` |
-| 版本 | 4.2.1 |
+| 版本 | 4.2.2 |
 | 作者 | tinycat |
 | 依赖 | BaseMod, RunHistoryPlus |
 | 许可证 | MPL-2.0 |
@@ -63,7 +63,8 @@ tinycat/
 │   └── chinese_english_mapping.json
 ├── docs/                         # 数据流与金币评估文档
 ├── scripts/
-│   └── validate_gold_estimate.py # 金币估算 / 追踪数据校验
+│   ├── validate_gold_estimate.py # 金币估算 / 追踪数据校验
+│   └── download_monster_images.py # 从灰机 wiki 生成本地怪物图包（不提交图片）
 ├── build.gradle.kts
 └── build-local.bat
 ```
@@ -108,7 +109,7 @@ tinycat/
 
 ## 第 0 层 HP 与金币追踪（可选测试版）
 
-主 TinyCat 4.2.1 **不写任何状态文件**，只在对局目录发现 `.tinycat` 时读取；没有就回退估算。这样普通安装不会在后台产生额外文件，也不会与其它 Mod 争抢写入。
+主 TinyCat 4.2.2 **不写任何状态文件**，只在对局目录发现 `.tinycat` 时读取；没有就回退估算。这样普通安装不会在后台产生额外文件，也不会与其它 Mod 争抢写入。
 
 精确值由独立的测试 Mod `TinyCatTrackerTest` 生成，写入 `runs/{runDir}/{start_ts}.tinycat`（key=value）：
 
@@ -140,7 +141,7 @@ updated_ts=...
 gradle buildTrackerTestJAR
 ```
 
-产物 `build/libs/TinyCatTrackerTest_V0.1.0.jar`。把它和 `TinyCat_V4.2.1.jar` 一起放入 `mods/`，打几局后运行校验脚本，即可对照状态文件与分数明细。测试 Mod 只写状态，不参与统计界面渲染。
+产物 `build/libs/TinyCatTrackerTest_V0.1.0.jar`。把它和 `TinyCat_V4.2.2.jar` 一起放入 `mods/`，打几局后运行校验脚本，即可对照状态文件与分数明细。测试 Mod 只写状态，不参与统计界面渲染。
 
 ### 金币估算准确度
 
@@ -200,11 +201,26 @@ gradle buildTrackerTestJAR
 ```
 
 产物：
-- 主 Mod：`build/libs/TinyCat_V4.2.1.jar`
+- 主 Mod：`build/libs/TinyCat_V4.2.2.jar`
 - 测试 Mod：`build/libs/TinyCatTrackerTest_V0.1.0.jar`
 
 ### 安装
 将 JAR 放入游戏的 `mods/` 目录。升级前删除旧版本 JAR，避免同时加载两个 TinyCat。
+
+### 怪物图片（本地图源）
+
+梯度表的图片从 `<game>/mods/TinyCat/monster-images/` 读取，模组本身不联网、不打包图包。可用脚本从灰机 wiki 的[敌人图鉴](https://sts.huijiwiki.com/wiki/%E6%95%8C%E4%BA%BA%E5%9B%BE%E9%89%B4)批量生成本地图包：
+
+```bash
+python scripts/download_monster_images.py --replace
+```
+
+- 下载 46 张图鉴原图，并生成 64 个以英文遭遇名命名的别名；原图保留在 `wiki/`。
+- 别名默认裁掉顶部名称、底部稀有度徽章并做圆角；`--no-crop` 保留完整图鉴卡。
+- 默认输出到 Steam 游戏目录；其它安装位置用 `--out` 指定，`--replace` 会先把旧图包改名备份。
+- 图源为 CC BY-NC-SA 4.0，游戏素材版权归 Mega Crit；仅限本地非商业使用。
+- 图包被 `.gitignore` 忽略，不要提交到仓库或打进 JAR / Release。
+- 读取时优先匹配英文遭遇名；旧图包文件名映射只作为兼容回退。
 
 ---
 
@@ -237,6 +253,10 @@ python scripts/validate_gold_estimate.py
 ---
 
 ## 更新日志
+
+### v4.2.2
+- 新增 `scripts/download_monster_images.py`：从灰机 wiki 敌人图鉴下载 46 张原图并生成 64 个遭遇别名；默认裁掉标题、稀有度徽章并做圆角（`--no-crop` 可保留整图）。图源仅限本地非商业使用（CC BY-NC-SA 4.0），不随仓库或 JAR 分发。
+- 怪物图片优先按英文遭遇名解析，旧图包文件名映射保留为兼容回退；无图条目仍使用占位图。
 
 ### v4.2.1
 - 怪物危险度梯度改用分层样本门槛：Boss 5、单角色非 Boss 10、全角色汇总非 Boss 30，不再使用固定 30 且不再受统计页最小样本下拉框影响。

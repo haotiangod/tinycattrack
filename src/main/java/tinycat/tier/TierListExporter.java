@@ -46,7 +46,7 @@ import java.util.zip.ZipOutputStream;
  */
 public final class TierListExporter {
     private static final String EXPORT_ROOT = "tierlist-export";
-    private static final String MOD_VERSION = "4.2.1";
+    private static final String MOD_VERSION = "4.2.2";
     private static final String[] STAT_FILES = {
             "总体统计.xlsx",
             "第一幕卡牌选取率.xlsx",
