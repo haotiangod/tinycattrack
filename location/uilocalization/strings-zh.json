@@ -89,6 +89,8 @@
         "export_tier_list": "导出抓率梯度",
         "export_all_tier_list": "导出全部统计",
         "exporting_tier_list": "导出中...",
+        "export_monster_tier": "导出怪物梯度",
+        "exporting_monster_tier": "导出怪物梯度中...",
         "export_done": "导出完成",
         "export_failed": "导出失败"
     },

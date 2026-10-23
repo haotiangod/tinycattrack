@@ -38,6 +38,8 @@ public class LocalizationKeys {
     public static final String UI_EXPORT_TIER_LIST = "ui.export_tier_list";
     public static final String UI_EXPORT_ALL_TIER_LIST = "ui.export_all_tier_list";
     public static final String UI_EXPORTING_TIER_LIST = "ui.exporting_tier_list";
+    public static final String UI_EXPORT_MONSTER_TIER = "ui.export_monster_tier";
+    public static final String UI_EXPORTING_MONSTER_TIER = "ui.exporting_monster_tier";
     public static final String UI_EXPORT_DONE = "ui.export_done";
     public static final String UI_EXPORT_FAILED = "ui.export_failed";
     

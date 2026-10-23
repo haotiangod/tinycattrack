@@ -14,12 +14,14 @@
 
 - **必须用 JDK 8 编译**，目标 Java 8 字节码。
 - Gradle 8 需要 Java 8 以上运行；用 `gradlew buildJAR` 或 `build-local.bat`。
-- 产物：`build/libs/TinyCat_V4.1.2.jar`；测试 Mod 为 `build/libs/TinyCatTrackerTest_V0.1.0.jar`。
+- 产物：`build/libs/TinyCat_V4.2.1.jar`；测试 Mod 为 `build/libs/TinyCatTrackerTest_V0.1.0.jar`。
 - 版本号同时改 `build.gradle.kts` 的 `versionTag`、`src/main/resources/ModTheSpire.json` 的 `version`；测试 Mod 版本在 `tracker-test/src/main/resources/ModTheSpire.json`。
 
 ## 当前状态
 
-- 版本 **4.1.2**：主 Mod 不再写 `.tinycat`，只读；金币/首层 HP 精确追踪拆到独立测试 Mod `TinyCatTrackerTest`（`tracker-test/`）。界面不再显示“第1层战损：估算”。
+- 版本 **4.2.1**：主 Mod 不再写 `.tinycat`，只读；金币/首层 HP 精确追踪拆到独立测试 Mod `TinyCatTrackerTest`（`tracker-test/`）。界面不再显示“第1层战损：估算”。
+- 导出默认中文；“全部导出”按统计界面分页生成 12 个中文 `.xlsx`（同类页面合并），由零依赖 `XlsxWriter` 生成，不使用 Apache POI。
+- 怪物危险度梯度按幕导出；样本门槛 Boss 5、单角色非 Boss 10、全角色汇总非 Boss 30，低样本条目保留在附录但不分档。
 - 战损统计按实际 Boss 楼层划分幕，跳过宝箱层（`T`）与 Boss 后奖励/过渡层。
 - 4.1.0 是集成追踪的旧版本；4.0.9 是更早的稳定版，均可作为行为回退参考。
 - 修 bug 优先最小改动；涉及统计口径的改动必须先用真实 `.run` 验证，并在回复中说明改了哪些文件。
@@ -35,7 +37,7 @@ src/main/java/tinycat/
 ├── CardNameNormalizer.java 卡牌名称归一化
 ├── Utils.java              反射读取游戏私有字段、数值格式化
 ├── stats/                  Run / RunData / ClassStat / Rate / Mean / WinStreak 等
-├── tier/                   Tier List 构建、图片渲染、CSV/HTML 导出
+├── tier/                   Tier List 构建、图片渲染、CSV/HTML/Excel 导出
 ├── patches/                StatsScreenPatch（统计界面与导出入口）
 └── ui/                     MoreStatsScreen / CharStatRenderer
 ```

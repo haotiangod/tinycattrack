@@ -31,6 +31,10 @@ import java.util.zip.ZipOutputStream;
  *     ├── data.json
  *     ├── tierlist.html
  *     ├── README.txt
+ *     ├── 总体统计.xlsx
+ *     ├── 第一幕卡牌选取率.xlsx
+ *     ├── 第一幕后卡牌选取率.xlsx
+ *     ├── ...（其余按统计界面分页的中文 Excel）
  *     └── images/
  *          ├── cards/*.png
  *          ├── relics/*.png
@@ -42,7 +46,21 @@ import java.util.zip.ZipOutputStream;
  */
 public final class TierListExporter {
     private static final String EXPORT_ROOT = "tierlist-export";
-    private static final String MOD_VERSION = "4.0.9";
+    private static final String MOD_VERSION = "4.2.1";
+    private static final String[] STAT_FILES = {
+            "总体统计.xlsx",
+            "第一幕卡牌选取率.xlsx",
+            "第一幕后卡牌选取率.xlsx",
+            "卡组中的卡牌胜率.xlsx",
+            "尼奥奖励.xlsx",
+            "BOSS遗物.xlsx",
+            "遭遇战伤害.xlsx",
+            "遭遇战死亡率与药水.xlsx",
+            "遗物胜率.xlsx",
+            "各幕事件胜率.xlsx",
+            "火堆行动.xlsx",
+            "商店行动.xlsx"
+    };
 
     private TierListExporter() {
     }
@@ -86,7 +104,7 @@ public final class TierListExporter {
             }
             writeCsv(model, new File(root, "data.csv"));
             writeJson(model, new File(root, "data.json"));
-            AllStatsExporter.write(screen, model, root);
+            AllStatsExporter.write(screen, model, root, model.scope);
             try {
                 TierListImageRenderer.write(model, root);
             } catch (Exception t) {
@@ -121,18 +139,18 @@ public final class TierListExporter {
         Writer writer = new OutputStreamWriter(new FileOutputStream(file), StandardCharsets.UTF_8);
         try {
             writer.write('\uFEFF');
-            writer.write("character_id,character_kind,seed_filter,group,type,id,name_en,name_zh,offered,picked,pick_rate_pct,tier,image\n");
+            writer.write("角色ID,角色类型,种子局筛选,分组,类型,条目ID,英文名,中文名,提供次数,选取次数,选取率(%),梯度,图片\n");
             for (TierListGroup group : model.groups) {
                 for (TierEntry entry : group.entries) {
                     writer.write(csv(model.characterId));
                     writer.write(',');
-                    writer.write(csv(model.characterKind()));
+                    writer.write(csv(model.isAggregate() ? "全角色汇总" : "单角色"));
                     writer.write(',');
-                    writer.write(csv(model.seedFilter.key));
+                    writer.write(csv(model.seedFilter.labelZh));
                     writer.write(',');
-                    writer.write(csv(group.key));
+                    writer.write(csv(group.labelZh));
                     writer.write(',');
-                    writer.write(csv(entry.type));
+                    writer.write(csv(typeZh(entry.type)));
                     writer.write(',');
                     writer.write(csv(entry.id));
                     writer.write(',');
@@ -309,12 +327,12 @@ public final class TierListExporter {
         html.append("Act split follows the existing TinyCat aggregation: floors &lt; 17 = Act 1, floors &gt;= 17 = after Act 1. ");
         html.append("Only A20, non-daily, non-special runs from the current save slot are included (same filter as the in-game stats). ");
         html.append("Seed filter: <b>").append(escapeHtml(model.seedFilter.labelEn)).append("</b>. ");
-        html.append("CSV rows include character_id, character_kind and seed_filter. There are 4 base characters; ALL is an aggregate, not a fifth character. ");
+        html.append("Chinese is the default language for data.csv and every .xlsx workbook. There are 4 base characters; ALL is an aggregate, not a fifth character. ");
         html.append("SKIP is kept as a real entry; Singing Bowl is merged into SKIP. CURSE/STATUS cards are excluded.<br>\n");
         html.append("<b>口径：</b>抓率 = 被选取次数 ÷ 被提供次数；第一幕/第一幕后沿用现有聚合（floor &lt; 17 为第一幕，floor &gt;= 17 为第一幕后）。");
         html.append("只统计当前存档位的 A20、非每日/特殊局（与游戏内统计一致），种子局筛选：<b>")
                 .append(escapeHtml(model.seedFilter.labelZh)).append("</b>。");
-        html.append("CSV 每行带 character_id、character_kind、seed_filter；基础角色 4 个，ALL 是汇总而非第 5 个角色。");
+        html.append("data.csv 与所有 .xlsx 均默认中文；基础角色 4 个，ALL 是汇总而非第 5 个角色。");
         html.append("SKIP 保留，颂钵并入 SKIP；CURSE/STATUS 卡剔除。<br>\n");
         html.append("<b>Images / 图片：</b> all images are extracted from the local game at runtime (CardLibrary / RelicLibrary); SKIP and missing images use a locally generated placeholder. No network or external image source. ");
         html.append("图片全部来自本地游戏内存（CardLibrary / RelicLibrary），SKIP 和缺失图使用本地生成的占位图；不访问网络、不依赖外部图源。\n");
@@ -326,11 +344,11 @@ public final class TierListExporter {
         if (new File(file.getParentFile(), "tierlist.png").isFile()) {
             html.append("<a href=\"tierlist.png\">tierlist.png</a>");
         }
-        if (new File(file.getParentFile(), "summary.csv").isFile()) {
-            html.append("<a href=\"summary.csv\">summary.csv</a>");
-        }
-        if (new File(file.getParentFile(), "all_stats.csv").isFile()) {
-            html.append("<a href=\"all_stats.csv\">all_stats.csv</a>");
+        for (String statFile : STAT_FILES) {
+            if (new File(file.getParentFile(), statFile).isFile()) {
+                html.append("<a href=\"").append(escapeHtml(statFile)).append("\">")
+                        .append(escapeHtml(statFile)).append("</a>");
+            }
         }
         html.append("<a href=\"data.csv\">data.csv</a><a href=\"data.json\">data.json</a><a href=\"README.txt\">README.txt</a></div>\n");
 
@@ -376,7 +394,7 @@ public final class TierListExporter {
             html.append("</section>\n");
         }
 
-        html.append("<footer>TinyCat ").append(MOD_VERSION).append(" · local export · data.csv / data.json / images/ · no external image source.</footer>\n");
+        html.append("<footer>TinyCat ").append(MOD_VERSION).append(" · local export · data.csv / data.json / 中文统计 Excel / images/ · no external image source.</footer>\n");
         html.append("</div>\n</body>\n</html>\n");
         writeString(file, html.toString());
     }
@@ -401,10 +419,14 @@ public final class TierListExporter {
 
         text.append("Files\n");
         text.append("-----\n");
-        text.append("data.csv      - one row per entry, UTF-8 with BOM (Excel friendly); includes character_id/character_kind/seed_filter columns\n");
+        text.append("data.csv      - one row per entry, Chinese headers, UTF-8 with BOM (Excel friendly)\n");
         text.append("data.json     - structured data with tier/group metadata\n");
-        text.append("summary.csv   - character/filter/basic stats + estimation flags\n");
-        text.append("all_stats.csv - long-form CSV for every TinyCat statistic dimension\n");
+        text.append("*.xlsx        - Chinese Excel workbooks following the in-game stats pages:\n");
+        text.append("                总体统计 / 第一幕卡牌选取率 / 第一幕后卡牌选取率 / 卡组中的卡牌胜率 /\n");
+        text.append("                尼奥奖励 / BOSS遗物 / 遭遇战伤害（战损、受到伤害、有无回复）/\n");
+        text.append("                遭遇战死亡率与药水 / 遗物胜率 / 各幕事件胜率 / 火堆行动 / 商店行动\n");
+        text.append("                同类页面合并为一个工作簿，每个统计页对应独立工作表；\n");
+        text.append("                全部导出时生成以上全部文件，单页导出只生成该页对应的工作簿\n");
         text.append("tierlist.html - self-contained visual tier list (open in any browser)\n");
         text.append("tierlist.jpg  - shareable full tier-list image (JPEG)\n");
         text.append("tierlist.png  - shareable full tier-list image (lossless PNG)\n");
@@ -460,6 +482,19 @@ public final class TierListExporter {
             return "images/placeholder.png";
         }
         return entry.imagePath.replace('\\', '/');
+    }
+
+    private static String typeZh(String type) {
+        if ("card".equals(type)) {
+            return "卡牌";
+        }
+        if ("boss_relic".equals(type)) {
+            return "BOSS遗物";
+        }
+        if ("skip".equals(type)) {
+            return "跳过";
+        }
+        return type == null ? "" : type;
     }
 
     private static String formatRate(double rate) {

@@ -876,6 +876,18 @@ public class Run implements Comparable<Run> {
         return isRewardFloor(floor) ? 0 : getAct(floor);
     }
 
+    /**
+     * path_per_floor 的节点类型：M=普通战斗、E=精英、B=Boss、?=事件、T=宝箱等。
+     * 返回空串表示该层没有可用路径记录。
+     */
+    public String getPathNode(int floor) {
+        if (floor <= 0 || runData.path_per_floor == null || floor > runData.path_per_floor.size()) {
+            return "";
+        }
+        String node = runData.path_per_floor.get(floor - 1);
+        return node == null ? "" : node;
+    }
+
     /** 本局实际到过的最后一幕，忽略 Boss 后的奖励/过渡层。 */
     public int getLastActForStats() {
         int floor = Math.max(1, floorsReached);

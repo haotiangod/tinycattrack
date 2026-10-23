@@ -1,6 +1,6 @@
 # TinyCat 数据流与统计口径
 
-> 描述当前 4.1.2 的实际逻辑，便于核对统计结果。
+> 描述当前 4.2.1 的实际逻辑，便于核对统计结果。
 > 代码位置以 `src/main/java/tinycat/` 为准；测试 Mod 在 `tracker-test/`。
 
 ## 1. 从游戏到统计界面
@@ -175,17 +175,48 @@ StatsScreenPatch 当前页面
   → TierListBuilder（按 scope）
   → TierImageExporter（缓存卡图/遗物图）
   → TierListImageRenderer（tierlist.jpg/png）
+  → AllStatsExporter（按统计页生成中文 .xlsx）
   → TierListExporter（CSV/JSON/HTML/README/zip）
 ```
 
-- 总体统计 → 四组 Tier List + `summary.csv` + `all_stats.csv` 全维度。
-- 第一幕卡牌 / 第一幕后卡牌 / Boss 遗物页面可导出对应 Tier List。
+- 导出文件默认中文：表头、工作表名、指标名、说明均为中文；卡牌/遗物/事件保留英文名辅助列。
+- 全部导出 → 四组 Tier List + 12 个 `.xlsx`：
+  - `总体统计.xlsx`：全角色基础、战斗与收益、删牌统计、当前筛选汇总、Meta 成长
+  - `第一幕卡牌选取率.xlsx`、`第一幕后卡牌选取率.xlsx`
+  - `卡组中的卡牌胜率.xlsx`
+  - `尼奥奖励.xlsx`：尼奥胜率、尼奥选取率
+  - `BOSS遗物.xlsx`：第一/二幕选取率、第一/二幕胜率、交换遗物胜率
+  - `遭遇战伤害.xlsx`：战损、受到伤害、有无回复
+  - `遭遇战死亡率与药水.xlsx`：死亡率、药水使用
+  - `遗物胜率.xlsx`：遗物胜率、购买遗物胜率
+  - `各幕事件胜率.xlsx`：第一/二/三幕
+  - `火堆行动.xlsx` / `商店行动.xlsx`：第一幕至第四幕
+- 同类页面合并为一个工作簿；卡牌选取率仍按第一幕/第一幕后拆成两个文件。
+- 单页导出（第一幕卡牌 / 第一幕后卡牌 / Boss 遗物）只写对应工作簿，避免生成无关统计。
+- `.xlsx` 由项目内 `XlsxWriter` 生成最小 OOXML，不引入 Apache POI 或其它第三方依赖。
 - 导出按钮位于页面右上角，不再遮挡内容；成功/失败只显示提示，路径写日志。
 
 CSV：
 
-- `data.csv`：Tier 条目，含 `character_id`、`character_kind`、`seed_filter`。
-- `summary.csv`：角色/筛选/基础统计/估算标记；`character_count=4`，`ALL` 是四角色汇总。
-- `all_stats.csv`：长表，覆盖所有 ClassStat 维度。
+- `data.csv`：Tier 条目，中文表头与中文取值，仍保留角色 ID、分组、梯度等机器可读字段。
+- Tier List 的分页/样本上限与统计界面一致：卡牌前 200、火堆每幕前 35、商店每幕前 32；最小样本过滤在名额截断之后。
 
 种子筛选会改变抓率样本，小样本（尤其 `min_sample=0`）容易跨档。
+
+## 9. 怪物危险度梯度
+
+```text
+统计页当前筛选（日期/角色/放弃局/种子局）
+  → MonsterTierBuilder（逐场 EncounterStats.actualHPLoss 按幕归类）
+  → MonsterTierModel
+  → MonsterTierExporter（xlsx/csv/json/html/zip）
+  → MonsterTierImageRenderer（png/jpg）
+```
+
+- 只统计 `path_per_floor` 为 `M`/`E` 的非 Boss 战与 `B` 的 Boss 战；事件、宝箱、火堆、商店与第四幕固定战不计入。
+- 主指标是平均实际战损（战前 HP − 战后 HP，正值掉血，负值回血），中位数、P90、95% CI 只作辅助。
+- Boss 不与普通怪混排，按幕内平均战损降序排为 T0；非 Boss（含精英）按同样顺序等人数分 T1-T4，T1 最高危。
+- 样本门槛：Boss ≥ 5；单角色非 Boss ≥ 10；全角色汇总非 Boss ≥ 30。门槛不读取统计页的最小样本下拉框。
+- 低于门槛的条目保留在“样本不足”区：`tier=null`、排名为空，仍输出样本数、样本占比、净战损合计与战损贡献占比。
+- 样本占比 = 该遭遇样本数 / 同幕同类（Boss 或非 Boss）样本总数；战损贡献占比 = 该遭遇净战损 / 同幕同类净战损合计，后者 ≤ 0 时为空。
+- JSON `schema_version=2`；`low_sample=true` 与 `tier=null` 表示未参与分档。

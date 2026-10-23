@@ -89,6 +89,8 @@
         "export_tier_list": "Export Tier List",
         "export_all_tier_list": "Export All Stats",
         "exporting_tier_list": "Exporting...",
+        "export_monster_tier": "Export Monster Tiers",
+        "exporting_monster_tier": "Exporting monster tiers...",
         "export_done": "Export complete",
         "export_failed": "Export failed"
     },

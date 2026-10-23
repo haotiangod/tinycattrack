@@ -5,6 +5,7 @@ import tinycat.LocalizationKeys;
 import tinycat.NameMapper;
 import tinycat.Utils;
 import tinycat.stats.*;
+import tinycat.tier.MonsterTierExporter;
 import tinycat.tier.TierListExporter;
 import tinycat.tier.TierListScope;
 import tinycat.tinycat;
@@ -814,14 +815,17 @@ public class StatsScreenPatch {
             sb.setColor(Color.WHITE);
         }
 
+        int statTypeIndex = moreStatsScreen == null || moreStatsScreen.statTypeDropdown == null
+                ? -1
+                : moreStatsScreen.statTypeDropdown.getSelectedIndex();
         String text;
         boolean showStatus = tierExportStatus != null && System.currentTimeMillis() < tierExportStatusUntil;
         if (showStatus) {
             text = tierExportStatus;
-        } else if (moreStatsScreen != null
-                && moreStatsScreen.statTypeDropdown != null
-                && moreStatsScreen.statTypeDropdown.getSelectedIndex() == 0) {
+        } else if (statTypeIndex == 0) {
             text = Localization.get(LocalizationKeys.UI_EXPORT_ALL_TIER_LIST);
+        } else if (statTypeIndex == 8) {
+            text = Localization.get(LocalizationKeys.UI_EXPORT_MONSTER_TIER);
         } else {
             text = Localization.get(LocalizationKeys.UI_EXPORT_TIER_LIST);
         }
@@ -834,8 +838,10 @@ public class StatsScreenPatch {
     }
 
     private static boolean isTierListPage(int statTypeIndex) {
-        // 0: 总体统计，导出全部四组 + 全部统计 CSV；1/2: 卡牌；5: BOSS 遗物
-        return statTypeIndex == 0 || statTypeIndex == 1 || statTypeIndex == 2 || statTypeIndex == 5;
+        // 0: 总体统计，导出全部四组 + 全部统计 CSV；1/2: 卡牌；5: BOSS 遗物；
+        // 8: 遭遇战平均战损，导出怪物危险度梯度（独立导出包，不改动原统计）
+        return statTypeIndex == 0 || statTypeIndex == 1 || statTypeIndex == 2
+                || statTypeIndex == 5 || statTypeIndex == 8;
     }
 
     private static TierListScope scopeForStatType(int statTypeIndex) {
@@ -901,7 +907,11 @@ public class StatsScreenPatch {
         if (clicked) {
             tierExportHb.clicked = false;
             tierExportHb.clickStarted = false;
-            startTierListExport(scopeForStatType(statTypeIndex));
+            if (statTypeIndex == 8) {
+                startMonsterTierExport();
+            } else {
+                startTierListExport(scopeForStatType(statTypeIndex));
+            }
         }
     }
 
@@ -933,6 +943,27 @@ public class StatsScreenPatch {
         } catch (Exception t) {
             tierExportStatus = Localization.get(LocalizationKeys.UI_EXPORT_FAILED);
             tinycat.logger.error("TierList export failed", t);
+        } finally {
+            exportingTierList = false;
+            tierExportStatusUntil = System.currentTimeMillis() + 20000L;
+        }
+    }
+
+    private static void startMonsterTierExport() {
+        if (exportingTierList) {
+            return;
+        }
+        exportingTierList = true;
+        tierExportStatus = Localization.get(LocalizationKeys.UI_EXPORTING_MONSTER_TIER);
+        tierExportStatusUntil = Long.MAX_VALUE;
+        tinycat.logger.info("Monster tier export started");
+        try {
+            String path = MonsterTierExporter.export(moreStatsScreen);
+            tierExportStatus = Localization.get(LocalizationKeys.UI_EXPORT_DONE);
+            tinycat.logger.info("Monster tier export finished: " + path);
+        } catch (Exception t) {
+            tierExportStatus = Localization.get(LocalizationKeys.UI_EXPORT_FAILED);
+            tinycat.logger.error("Monster tier export failed", t);
         } finally {
             exportingTierList = false;
             tierExportStatusUntil = System.currentTimeMillis() + 20000L;
