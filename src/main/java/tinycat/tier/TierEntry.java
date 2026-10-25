@@ -25,10 +25,16 @@ public class TierEntry {
     public String imageText;
     /** 补充口径，例如火堆升级目标的「抓取 X/Y」；为空则不显示。 */
     public String context = "";
-    /** 标准化率（%, Bradley-Terry）；< 0 表示该表没有标准化口径。 */
+    /** 标准化率（%, Plackett-Luce 强度占比）；< 0 表示该表没有标准化口径。 */
     public double standardized = -1.0D;
     public double stdLow = 0.0D;
     public double stdHigh = 0.0D;
+    /** 并列组号：同组表示统计上分不出先后；0 = 该表不做并列判定。 */
+    public int tieGroup = 0;
+    /** 是否确实和别人并列（并列组里不止一条）。 */
+    public boolean tied = false;
+    /** P(排名第一)；< 0 表示该表不提供。 */
+    public double rankOne = -1.0D;
 
     public TierEntry(String id,
                      String nameEn,

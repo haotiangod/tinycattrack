@@ -19,6 +19,12 @@ import java.util.zip.ZipOutputStream;
  * 多工作表、内联字符串、数字/百分比、基础样式、冻结表头、自动筛选和列宽。
  */
 public final class XlsxWriter {
+    /** 置信区间可信度配色：0 红（不可信）、1 绿（可信）、2 橙（一般）、-1 不上色。 */
+    public static final int RELIABILITY_LOW = 0;
+    public static final int RELIABILITY_HIGH = 1;
+    public static final int RELIABILITY_MEDIUM = 2;
+    public static final int RELIABILITY_NONE = -1;
+
     private final List<Sheet> sheets = new ArrayList<Sheet>();
 
     public Sheet addSheet(String name) {
@@ -130,19 +136,25 @@ public final class XlsxWriter {
                 + "<numFmt numFmtId=\"164\" formatCode=\"0.000\"/>"
                 + "<numFmt numFmtId=\"165\" formatCode=\"0.0\"/>"
                 + "</numFmts>"
-                + "<fonts count=\"5\">"
+                + "<fonts count=\"8\">"
                 + "<font><sz val=\"11\"/><color rgb=\"FF1F2937\"/><name val=\"Microsoft YaHei\"/><family val=\"2\"/></font>"
                 + "<font><b/><sz val=\"16\"/><color rgb=\"FF111827\"/><name val=\"Microsoft YaHei\"/><family val=\"2\"/></font>"
                 + "<font><i/><sz val=\"10\"/><color rgb=\"FF6B7280\"/><name val=\"Microsoft YaHei\"/><family val=\"2\"/></font>"
                 + "<font><b/><sz val=\"11\"/><color rgb=\"FFFFFFFF\"/><name val=\"Microsoft YaHei\"/><family val=\"2\"/></font>"
                 + "<font><b/><sz val=\"11\"/><color rgb=\"FF92400E\"/><name val=\"Microsoft YaHei\"/><family val=\"2\"/></font>"
+                + "<font><b/><sz val=\"11\"/><color rgb=\"FF15803D\"/><name val=\"Microsoft YaHei\"/><family val=\"2\"/></font>"
+                + "<font><b/><sz val=\"11\"/><color rgb=\"FFB45309\"/><name val=\"Microsoft YaHei\"/><family val=\"2\"/></font>"
+                + "<font><b/><sz val=\"11\"/><color rgb=\"FFB91C1C\"/><name val=\"Microsoft YaHei\"/><family val=\"2\"/></font>"
                 + "</fonts>"
-                + "<fills count=\"5\">"
+                + "<fills count=\"8\">"
                 + "<fill><patternFill patternType=\"none\"/></fill>"
                 + "<fill><patternFill patternType=\"gray125\"/></fill>"
                 + "<fill><patternFill patternType=\"solid\"><fgColor rgb=\"FF1F2937\"/><bgColor indexed=\"64\"/></patternFill></fill>"
                 + "<fill><patternFill patternType=\"solid\"><fgColor rgb=\"FFF3F4F6\"/><bgColor indexed=\"64\"/></patternFill></fill>"
                 + "<fill><patternFill patternType=\"solid\"><fgColor rgb=\"FFFFF7E6\"/><bgColor indexed=\"64\"/></patternFill></fill>"
+                + "<fill><patternFill patternType=\"solid\"><fgColor rgb=\"FFE8F5E9\"/><bgColor indexed=\"64\"/></patternFill></fill>"
+                + "<fill><patternFill patternType=\"solid\"><fgColor rgb=\"FFFFF4E0\"/><bgColor indexed=\"64\"/></patternFill></fill>"
+                + "<fill><patternFill patternType=\"solid\"><fgColor rgb=\"FFFDEBEC\"/><bgColor indexed=\"64\"/></patternFill></fill>"
                 + "</fills>"
                 + "<borders count=\"2\">"
                 + "<border><left/><right/><top/><bottom/><diagonal/></border>"
@@ -150,7 +162,7 @@ public final class XlsxWriter {
                 + "<top style=\"thin\"><color rgb=\"FFE5E7EB\"/></top><bottom style=\"thin\"><color rgb=\"FFE5E7EB\"/></bottom><diagonal/></border>"
                 + "</borders>"
                 + "<cellStyleXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/></cellStyleXfs>"
-                + "<cellXfs count=\"13\">"
+                + "<cellXfs count=\"25\">"
                 + "<xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\"/>"
                 + "<xf numFmtId=\"0\" fontId=\"1\" fillId=\"0\" borderId=\"0\" xfId=\"0\" applyFont=\"1\" applyAlignment=\"1\"><alignment vertical=\"center\"/></xf>"
                 + "<xf numFmtId=\"0\" fontId=\"2\" fillId=\"0\" borderId=\"0\" xfId=\"0\" applyFont=\"1\" applyAlignment=\"1\"><alignment vertical=\"top\" wrapText=\"1\"/></xf>"
@@ -164,6 +176,18 @@ public final class XlsxWriter {
                 + "<xf numFmtId=\"3\" fontId=\"4\" fillId=\"4\" borderId=\"1\" xfId=\"0\" applyNumberFormat=\"1\" applyFont=\"1\" applyFill=\"1\" applyBorder=\"1\" applyAlignment=\"1\"><alignment horizontal=\"right\" vertical=\"center\"/></xf>"
                 + "<xf numFmtId=\"164\" fontId=\"4\" fillId=\"4\" borderId=\"1\" xfId=\"0\" applyNumberFormat=\"1\" applyFont=\"1\" applyFill=\"1\" applyBorder=\"1\" applyAlignment=\"1\"><alignment horizontal=\"right\" vertical=\"center\"/></xf>"
                 + "<xf numFmtId=\"10\" fontId=\"4\" fillId=\"4\" borderId=\"1\" xfId=\"0\" applyNumberFormat=\"1\" applyFont=\"1\" applyFill=\"1\" applyBorder=\"1\" applyAlignment=\"1\"><alignment horizontal=\"right\" vertical=\"center\"/></xf>"
+                + "<xf numFmtId=\"0\" fontId=\"0\" fillId=\"5\" borderId=\"1\" xfId=\"0\" applyFill=\"1\" applyBorder=\"1\" applyAlignment=\"1\"><alignment vertical=\"center\"/></xf>"
+                + "<xf numFmtId=\"3\" fontId=\"0\" fillId=\"5\" borderId=\"1\" xfId=\"0\" applyNumberFormat=\"1\" applyFill=\"1\" applyBorder=\"1\" applyAlignment=\"1\"><alignment horizontal=\"right\" vertical=\"center\"/></xf>"
+                + "<xf numFmtId=\"10\" fontId=\"0\" fillId=\"5\" borderId=\"1\" xfId=\"0\" applyNumberFormat=\"1\" applyFill=\"1\" applyBorder=\"1\" applyAlignment=\"1\"><alignment horizontal=\"right\" vertical=\"center\"/></xf>"
+                + "<xf numFmtId=\"0\" fontId=\"0\" fillId=\"6\" borderId=\"1\" xfId=\"0\" applyFill=\"1\" applyBorder=\"1\" applyAlignment=\"1\"><alignment vertical=\"center\"/></xf>"
+                + "<xf numFmtId=\"3\" fontId=\"0\" fillId=\"6\" borderId=\"1\" xfId=\"0\" applyNumberFormat=\"1\" applyFill=\"1\" applyBorder=\"1\" applyAlignment=\"1\"><alignment horizontal=\"right\" vertical=\"center\"/></xf>"
+                + "<xf numFmtId=\"10\" fontId=\"0\" fillId=\"6\" borderId=\"1\" xfId=\"0\" applyNumberFormat=\"1\" applyFill=\"1\" applyBorder=\"1\" applyAlignment=\"1\"><alignment horizontal=\"right\" vertical=\"center\"/></xf>"
+                + "<xf numFmtId=\"0\" fontId=\"0\" fillId=\"7\" borderId=\"1\" xfId=\"0\" applyFill=\"1\" applyBorder=\"1\" applyAlignment=\"1\"><alignment vertical=\"center\"/></xf>"
+                + "<xf numFmtId=\"3\" fontId=\"0\" fillId=\"7\" borderId=\"1\" xfId=\"0\" applyNumberFormat=\"1\" applyFill=\"1\" applyBorder=\"1\" applyAlignment=\"1\"><alignment horizontal=\"right\" vertical=\"center\"/></xf>"
+                + "<xf numFmtId=\"10\" fontId=\"0\" fillId=\"7\" borderId=\"1\" xfId=\"0\" applyNumberFormat=\"1\" applyFill=\"1\" applyBorder=\"1\" applyAlignment=\"1\"><alignment horizontal=\"right\" vertical=\"center\"/></xf>"
+                + "<xf numFmtId=\"0\" fontId=\"5\" fillId=\"5\" borderId=\"1\" xfId=\"0\" applyFont=\"1\" applyFill=\"1\" applyBorder=\"1\" applyAlignment=\"1\"><alignment horizontal=\"center\" vertical=\"center\"/></xf>"
+                + "<xf numFmtId=\"0\" fontId=\"6\" fillId=\"6\" borderId=\"1\" xfId=\"0\" applyFont=\"1\" applyFill=\"1\" applyBorder=\"1\" applyAlignment=\"1\"><alignment horizontal=\"center\" vertical=\"center\"/></xf>"
+                + "<xf numFmtId=\"0\" fontId=\"7\" fillId=\"7\" borderId=\"1\" xfId=\"0\" applyFont=\"1\" applyFill=\"1\" applyBorder=\"1\" applyAlignment=\"1\"><alignment horizontal=\"center\" vertical=\"center\"/></xf>"
                 + "</cellXfs>"
                 + "<cellStyles count=\"1\"><cellStyle name=\"Normal\" xfId=\"0\" builtinId=\"0\"/></cellStyles>"
                 + "<dxfs count=\"0\"/>"
@@ -269,6 +293,34 @@ public final class XlsxWriter {
             return valid(fraction) ? new Cell(null, fraction, 12) : null;
         }
 
+        /** 可信度列：绿 = 可信、橙 = 一般、红 = 不可信。 */
+        public static Cell reliability(String value, int level) {
+            int style = level == RELIABILITY_HIGH ? 22 : level == RELIABILITY_MEDIUM ? 23 : 24;
+            return new Cell(value == null ? "" : value, null, style);
+        }
+
+        private Cell tint(int level) {
+            int mapped = tintStyle(style, level);
+            return mapped == style ? this : new Cell(text, number, mapped);
+        }
+
+        private static int tintStyle(int style, int level) {
+            if (level == RELIABILITY_HIGH) {
+                if (style == 4) return 13;
+                if (style == 5) return 14;
+                if (style == 8) return 15;
+            } else if (level == RELIABILITY_MEDIUM) {
+                if (style == 4) return 16;
+                if (style == 5) return 17;
+                if (style == 8) return 18;
+            } else if (level == RELIABILITY_LOW) {
+                if (style == 4) return 19;
+                if (style == 5) return 20;
+                if (style == 8) return 21;
+            }
+            return style;
+        }
+
 
         private static boolean valid(double value) {
             return !Double.isNaN(value) && !Double.isInfinite(value);
@@ -338,6 +390,21 @@ public final class XlsxWriter {
             List<Cell> row = new ArrayList<Cell>(values.length);
             for (int i = 0; i < values.length; i++) {
                 Cell cell = values[i];
+                row.add(cell);
+                if (cell != null) {
+                    measureCell(i, cell.text != null ? cell.text : "00000");
+                }
+            }
+            rows.add(row);
+            maxColumns = Math.max(maxColumns, values.length);
+            return this;
+        }
+
+        /** 整行按可信度上色；只改文本/整数/百分比三种数据样式，其他单元格保持原样。 */
+        public Sheet dataTinted(int level, Cell... values) {
+            List<Cell> row = new ArrayList<Cell>(values.length);
+            for (int i = 0; i < values.length; i++) {
+                Cell cell = values[i] == null ? null : values[i].tint(level);
                 row.add(cell);
                 if (cell != null) {
                     measureCell(i, cell.text != null ? cell.text : "00000");

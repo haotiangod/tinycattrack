@@ -43,7 +43,15 @@ public enum Tier {
      * 长尾表的 0%~0.9% 条目数量很多，若和 1%~7% 一起走自然断点，会被并成同一档，
      * 看不出「几乎不会被选」和「偶尔被选」的差别，所以单独切出来。
      */
-    RZ("R0", "0 (<1%)", "0 极低 (<1%)", 0.0D, 0.0D, "#4b5263");
+    RZ("R0", "0 (<1%)", "0 极低 (<1%)", 0.0D, 0.0D, "#4b5263"),
+    /**
+     * 标准化卡牌视图的最低档：<1% 长尾再按对数尺度切出的下半段。
+     *
+     * 标准化率合计 100%，卡牌条目多，一半以上在 1% 以下；只给一个 R0 会让最低档装下
+     * 50+ 张卡，看不出尾部内部的差别。所以卡牌标准化视图把长尾切成 R0 / R00 两档，
+     * R00 仍然是 <1%，只是比 R0 更低。
+     */
+    RZZ("R00", "0 (lowest)", "0 最低", 0.0D, 0.0D, "#343945");
 
     public final String key;
     public final String labelEn;
@@ -101,8 +109,9 @@ public enum Tier {
         return this == ZERO;
     }
 
-    /** 排名型档位（S/A/B/C/D），与抓率型档位（S..F/0）互斥使用。 */
+    /** 排名型档位（S/A/B/C/D + 两档长尾），与抓率型档位（S..F/0）互斥使用。 */
     public boolean isRankBased() {
-        return this == RS || this == RA || this == RB || this == RC || this == RD || this == RZ;
+        return this == RS || this == RA || this == RB || this == RC || this == RD
+                || this == RZ || this == RZZ;
     }
 }

@@ -1163,9 +1163,10 @@ public class StatsScreenPatch {
             case 0:
                 return TierListScope.ALL;
             case 1:
-                return TierListScope.CARDS_ACT1;
             case 2:
-                return TierListScope.CARDS_AFTER_ACT1;
+                // 前端「第一幕」「第一幕后」都导出完整四组卡牌表：
+                // 分幕数据是核心，不能因为用户停在哪一页就只给一段。
+                return TierListScope.CARDS_ALL_ACTS;
             case 4:
                 return TierListScope.NEOW;
             case 5:

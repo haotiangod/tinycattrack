@@ -10,6 +10,8 @@
 - 战损：actualHPLoss = 前一层结束HP - 本层结束HP（第 1 层按 floor0HP 估算：机器人/猎人/观者 = 本层HP+本层伤害）
 - 平均：Mean = Σ/n，每次遭遇一个样本；每幕总战损按「每局一个样本」
 - 梯度：Boss 全进 T0 按均值降序；非 Boss 按幕内等人数切 T1..T4；不设样本下限（lowSample 只标注）
+- 标准化率：用 .run 原始记录重建「一次奖励屏 = 一个选择集」，独立做 Plackett-Luce
+  拟合（先验 a=1、b=0.01，整屏进似然），再和 data.csv 的标准化率列逐张比对
 """
 from __future__ import annotations
 
@@ -17,6 +19,7 @@ import csv
 import glob
 import io
 import json
+import math
 import os
 import re
 import statistics
@@ -394,22 +397,34 @@ def compute(runs, cls):
     out["question"] = q
     out["events"] = ev
 
-    # 卡牌抓率（第一幕/<17 与 第一幕后）
-    act1 = defaultdict(lambda: [0, 0])   # name -> [picked, offered]
+    # 卡牌抓率（按实际幕：一幕包含 floor 0 与一幕 Boss 后的奖励屏，不再用 floor<17 硬切）
+    card = {
+        "act1": defaultdict(lambda: [0, 0]),
+        "act2": defaultdict(lambda: [0, 0]),
+        "act34": defaultdict(lambda: [0, 0]),
+    }
     after = defaultdict(lambda: [0, 0])
     for r in runs:
         for c in r.d.get("card_choices") or []:
             floor = int(c.get("floor") or 0)
             picked = c.get("picked")
             skipped = c.get("not_picked") or []
-            tgt = act1 if floor < 17 else after
+            act = r.act(floor)
+            key = "act1" if act <= 1 else ("act2" if act == 2 else "act34")
+            targets = [card[key]]
+            if act >= 2:
+                targets.append(after)
             pkey = CARD_RENAMES.get(norm_name(picked), norm_name(picked))
-            tgt[pkey][0] += 1
-            tgt[pkey][1] += 1
+            for tgt in targets:
+                tgt[pkey][0] += 1
+                tgt[pkey][1] += 1
             for s in skipped:
                 skey = CARD_RENAMES.get(norm_name(s), norm_name(s))
-                tgt[skey][1] += 1
-    out["card_act1"] = act1
+                for tgt in targets:
+                    tgt[skey][1] += 1
+    out["card_act1"] = card["act1"]
+    out["card_act2"] = card["act2"]
+    out["card_act34"] = card["act34"]
     out["card_after"] = after
 
     # 怪物梯度（每幕，Boss/非Boss，等人数分档；gate=None 表示不设下限，否则按门槛排除）
@@ -452,6 +467,163 @@ def compute(runs, cls):
     return out
 
 
+# ---------------------------------------------------------------- 标准化率复算
+def card_key(name):
+    """卡名 → 标准化 key：去掉升级后缀、套用 CardNameNormalizer 的重命名、颂钵并入 SKIP。"""
+    base = re.sub(r"\+\d+$", "", (name or "").strip())
+    raw = norm_name(base)
+    key = CARD_RENAMES.get(raw, raw)
+    return "skip" if key == "singingbowl" else key
+
+
+CARD_ACT_FILTERS = {
+    "act1": {1},
+    "act2": {2},
+    "act34": {34},
+    "after": {2, 34},
+}
+
+
+def card_events(run, group="act1"):
+    """复刻 Run.java：picked 不是 SKIP/颂钵时，not_picked 里补一个 SKIP（持有颂钵后补颂钵）。
+
+    group 与 CardStat 的分幕一致：act1 含 floor 0 与一幕 Boss 后的奖励屏；
+    三、四幕合并成 act34；after = 第二至四幕。
+    """
+    wanted = CARD_ACT_FILTERS[group]
+    bowl_floor = None
+    for r in run.d.get("relics_obtained") or []:
+        if r.get("key") == "Singing Bowl":
+            f = r.get("floor")
+            if f is not None and (bowl_floor is None or f < bowl_floor):
+                bowl_floor = f
+    out = []
+    for c in run.d.get("card_choices") or []:
+        floor = int(c.get("floor") or 0)
+        act = run.act(floor)
+        if (34 if act >= 3 else act) not in wanted:
+            continue
+        picked = re.sub(r"\+\d+$", "", (c.get("picked") or "").strip())
+        if not picked:
+            continue
+        alts = [re.sub(r"\+\d+$", "", x).strip() for x in (c.get("not_picked") or [])]
+        alts = [a for a in alts if a]
+        if picked not in ("SKIP", "Singing Bowl"):
+            if bowl_floor is not None and bowl_floor <= floor:
+                alts.append("Singing Bowl")
+            else:
+                alts.append("SKIP")
+        out.append((picked, alts))
+    return out
+
+
+def pl_strength(blocks, prior_wins=1.0, prior_survival=0.01, tol=1e-9, max_iter=2000):
+    """Plackett-Luce MM 迭代（与 PlackettLuce.java 同参数），返回各选项强度（几何均值归一）。
+
+    blocks: [(picked, [alts...]), ...]，每个元素是一次整屏选择。
+    """
+    universe = []
+    seen = set()
+    for picked, alts in blocks:
+        for k in [picked] + list(alts):
+            if k not in seen:
+                seen.add(k)
+                universe.append(k)
+    wins = {k: 0.0 for k in universe}
+    for picked, _ in blocks:
+        wins[picked] += 1.0
+    s = {k: 1.0 for k in universe}
+    for _ in range(max_iter):
+        denom = {k: 0.0 for k in universe}
+        for picked, alts in blocks:
+            z = sum(s[k] for k in [picked] + list(alts))
+            if z <= 0:
+                continue
+            for k in [picked] + list(alts):
+                denom[k] += 1.0 / z
+        nxt = {}
+        for k in universe:
+            v = (wins[k] + prior_wins) / (denom[k] + prior_survival)
+            nxt[k] = max(v, 1e-12)
+        geo = math.exp(sum(math.log(v) for v in nxt.values()) / len(nxt))
+        max_rel = 0.0
+        for k in universe:
+            v = max(nxt[k] / geo, 1e-12)
+            max_rel = max(max_rel, abs(v / s[k] - 1.0))
+            s[k] = v
+        if max_rel < tol:
+            break
+    return s
+
+
+def check_standardized(export_dir, runs, rows):
+    with io.open(os.path.join(export_dir, "data.csv"), encoding="utf-8-sig") as fh:
+        table = [r for r in csv.DictReader(fh) if r["分组"] == "第一幕卡牌选取率"]
+    if not table:
+        rows.append(("标准化率表", 1, 0, "DIFF", "data.csv 没有第一幕卡牌行"))
+        return
+    if "标准化率(%)" not in table[0]:
+        rows.append(("标准化率列", 1, 0, "DIFF", "data.csv 缺少标准化率三列"))
+        return
+
+    # 一次奖励屏 = 一个选择集；整屏进似然，不拆成两两对决
+    blocks = []
+    for run in runs:
+        for picked, alts in card_events(run, "act1"):
+            group = []
+            for name in [picked] + alts:
+                key = card_key(name)
+                if key not in group:
+                    group.append(key)
+            if len(group) >= 2:
+                blocks.append((group[0], group[1:]))
+    strength = pl_strength(blocks)
+
+    # 只有入表条目分摊 100%；被过滤的卡仍然是对手
+    report = [card_key(r["英文名"]) for r in table if (r.get("标准化率(%)") or "") != ""]
+    total = sum(strength.get(k, 0.0) for k in report)
+    shares = {k: (100.0 * strength.get(k, 0.0) / total if total > 0 else 0.0) for k in report}
+
+    diffs = []
+    for r in table:
+        text = r.get("标准化率(%)") or ""
+        if text == "":
+            continue
+        exp = num(text)
+        act = shares.get(card_key(r["英文名"]), 0.0)
+        diffs.append((abs(exp - act), r["英文名"], exp, act))
+    diffs.sort(reverse=True)
+    within = sum(1 for d, _, _, _ in diffs if d <= 0.01)
+    print("\n标准化率（第一幕，独立 PL 复算，%d 张）：" % len(diffs))
+    for d, name, exp, act in diffs[:5]:
+        print("  %-24s 导出 %8.2f%%  复算 %8.2f%%  Δ%.4f" % (name, exp, act, d))
+    print("  误差 ≤0.01pp 的条目：%d/%d" % (within, len(diffs)))
+    rows.append(("标准化率逐张一致", len(diffs), within, "OK" if within == len(diffs) else "DIFF", "≤0.01pp"))
+    total = sum(shares.values())
+    rows.append(("标准化率合计 100%", 100.0, round(total, 6),
+                 "OK" if abs(total - 100.0) < 1e-6 else "DIFF", ""))
+
+    # 区间只做合法性检查：无法从 .run 独立复算（整屏 bootstrap 依赖 Java 侧的选择块顺序），
+    # 但下端 ≤ 点估计 ≤ 上端、且宽度 > 0 必须在每一行成立
+    checked = 0
+    bad = []
+    for r in table:
+        text = r.get("标准化率(%)") or ""
+        lo = r.get("标准化CI下(%)") or ""
+        hi = r.get("标准化CI上(%)") or ""
+        if text == "" or lo == "" or hi == "":
+            continue
+        checked += 1
+        v, a, b = num(text), num(lo), num(hi)
+        if not (a <= v <= b) or b - a <= 1e-9:
+            bad.append((r["英文名"], v, a, b))
+    print("  CI 包住点估计且宽度 > 0：%d/%d" % (checked - len(bad), checked))
+    for name, v, a, b in bad[:5]:
+        print("    %-24s 率 %8.2f  CI %8.2f-%8.2f" % (name, v, a, b))
+    rows.append(("标准化 CI 合法", checked, checked - len(bad),
+                 "OK" if not bad else "DIFF", "下端≤率≤上端"))
+
+
 # ---------------------------------------------------------------- 报告
 def check(rows, label, expected, actual, tol=1e-6, note=""):
     ok = abs(expected - actual) <= tol if isinstance(expected, float) else expected == actual
@@ -487,6 +659,21 @@ def main():
     print(f"原始   : {len(runs)} 局（A20 / 非每日特殊 / 合法卡组遗物）\n")
 
     rows = []
+    # --- 导出文件齐全性（双口径导出：简单率 + 标准化率各三个，图表包各一张）
+    has_std = any("standardized_pct" in e
+                  for g in data.get("groups") or [] for e in g.get("entries") or [])
+    required = ["tierlist.html", "tierlist.png", "tierlist.jpg"]
+    if has_std:
+        required += ["tierlist_standardized.html", "tierlist_standardized.png",
+                     "tierlist_standardized.jpg",
+                     os.path.join("图表", "00-完整梯度图-标准化率.png"),
+                     os.path.join("图表", "00-完整梯度图-标准化率.jpg")]
+    print("导出文件：")
+    for name in required:
+        ok = os.path.isfile(os.path.join(export_dir, name))
+        print("  %-40s %s" % (name, "OK" if ok else "缺失"))
+        rows.append(("文件 " + name, True, ok, "OK" if ok else "DIFF", ""))
+    print()
     # --- 基础
     s1 = xlsx_rows(os.path.join(export_dir, "总体统计.xlsx"))
     char_rows = {}
@@ -537,6 +724,9 @@ def main():
         print(f"  {r['英文名']:<22} 导出 {r['选取次数']}/{r['提供次数']:<4} "
               f"复算 {picked}/{offered:<4} {mark}")
         rows.append((f"抓率 {r['英文名']}", int(r['提供次数']), offered, mark, ""))
+
+    if has_std:
+        check_standardized(export_dir, runs, rows)
 
     # --- 遭遇战战损（sheet1 每个遭遇行）
     print("\n遭遇战平均战损（第一幕前 5）：")

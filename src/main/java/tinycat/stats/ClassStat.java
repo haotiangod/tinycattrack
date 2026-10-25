@@ -56,15 +56,25 @@ public class ClassStat {
     public int minDeckSize = 0;
     public int maxDeckSize = 0;
     public List<Rate<Card>> cardPicksAct1;
+    public List<Rate<Card>> cardPicksAct2;
+    public List<Rate<Card>> cardPicksAct3_4;
+    /** 第一幕以后 = 第二、三、四幕的合并，不是与上面三组并列的第四段。 */
     public List<Rate<Card>> cardPicksAfterAct1;
+    /**
+     * 每次奖励屏的原样记录：[0] 被选中，[1..] 同屏未选。
+     *
+     * 这是强度模型（Plackett-Luce）的输入，也是置信区间整屏重采样的单位：
+     * 一次奖励屏是一个决定，拆成几条两两胜负后不能当独立样本。
+     */
+    public final List<Card[]> cardChoicesAct1 = new ArrayList<Card[]>();
+    public final List<Card[]> cardChoicesAct2 = new ArrayList<Card[]>();
+    public final List<Card[]> cardChoicesAct3_4 = new ArrayList<Card[]>();
+    public final List<Card[]> cardChoicesAfterAct1 = new ArrayList<Card[]>();
     public List<Rate<Card>> cardWinRate;
     public List<Rate<Neow>> neowWinRate;
     public List<Rate<Neow>> neowPickRate;
-    /**
-     * 尼奥选项的两两对决矩阵：`neowBeats[A].get(B)` = A 和 B 同场且 A 被选中的次数。
-     * 每局是「1 选中 + 3 跳过」，等价于 3 场 A 对 B 的对决，用于 Bradley-Terry 标准化。
-     */
-    public final Map<Neow, Map<Neow, Integer>> neowBeats = new HashMap<>();
+    /** 每局尼奥的原样记录：[0] 被选中，[1..] 同屏未选。强度模型与整局重采样都用它。 */
+    public final List<Neow[]> neowChoices = new ArrayList<Neow[]>();
     public List<Rate<BossRelic>> bossRelicPickRateAct1;
     public List<Rate<BossRelic>> bossRelicPickRateAct2;
     public List<Rate<BossRelic>> bossRelicWinRateAct1;
@@ -260,11 +270,17 @@ public class ClassStat {
         Mean averageScore = new Mean("Average Score");
         Mean averageGold = new Mean("Average Gold");  // 平均金钱
         Map<Card, Rate<Card>> cardPicksAct1 = new HashMap<>();
+        Map<Card, Rate<Card>> cardPicksAct2 = new HashMap<>();
+        Map<Card, Rate<Card>> cardPicksAct3_4 = new HashMap<>();
         Map<Card, Rate<Card>> cardPicksAfterAct1 = new HashMap<>();
+        List<Card[]> cardChoicesAct1 = new ArrayList<Card[]>();
+        List<Card[]> cardChoicesAct2 = new ArrayList<Card[]>();
+        List<Card[]> cardChoicesAct3_4 = new ArrayList<Card[]>();
+        List<Card[]> cardChoicesAfterAct1 = new ArrayList<Card[]>();
         Map<Card, Rate<Card>> cardWinRate = new HashMap<>();
         Map<Neow, Rate<Neow>> neowWinRate = new HashMap<>();
         Map<Neow, Rate<Neow>> neowPickRate = new HashMap<>();
-        Map<Neow, Map<Neow, Integer>> neowBeats = new HashMap<>();
+        List<Neow[]> neowChoices = new ArrayList<Neow[]>();
         Map<BossRelic, Rate<BossRelic>> bossRelicPickRateAct1 = new HashMap<>();
         Map<BossRelic, Rate<BossRelic>> bossRelicPickRateAct2 = new HashMap<>();
         Map<BossRelic, Rate<BossRelic>> bossRelicWinRateAct1 = new HashMap<>();
@@ -501,17 +517,63 @@ public class ClassStat {
 
         private void cardPickStats(Run run) {
             if (run.cardChoices == null) return;
-            
+
             for (CardChoice c : run.cardChoices) {
-                Map<Card, Rate<Card>> map = c.floor >= 17 ? cardPicksAfterAct1 : cardPicksAct1;
-                Rate<Card> pickedRate = map.computeIfAbsent(c.picked, k -> new Rate<>(k));
-                pickedRate.win++;
-                
-                for (Card skipped : c.skipped) {
-                    Rate<Card> skipRate = map.computeIfAbsent(skipped, k -> new Rate<>(k));
-                    skipRate.loss++;
+                // 按实际幕拆分：一幕包含 floor 0 与一幕 Boss 后的奖励屏，
+                // 不能再用 floor >= 17 硬切（真实数据里一幕 Boss 在 17 层）。
+                int act = run.getAct(c.floor);
+                Map<Card, Rate<Card>> picks;
+                List<Card[]> choices;
+                if (act <= 1) {
+                    picks = cardPicksAct1;
+                    choices = cardChoicesAct1;
+                } else if (act == 2) {
+                    picks = cardPicksAct2;
+                    choices = cardChoicesAct2;
+                } else {
+                    picks = cardPicksAct3_4;
+                    choices = cardChoicesAct3_4;
+                }
+                countCardPick(picks, c);
+                Card[] block = cardChoiceBlock(c);
+                if (block != null) {
+                    choices.add(block);
+                }
+                // 第一幕后是第二至四幕的合并视图，与分幕表共用同一份原样记录
+                if (act >= 2) {
+                    countCardPick(cardPicksAfterAct1, c);
+                    if (block != null) {
+                        cardChoicesAfterAct1.add(block);
+                    }
                 }
             }
+        }
+
+        private static void countCardPick(Map<Card, Rate<Card>> map, CardChoice c) {
+            Rate<Card> pickedRate = map.computeIfAbsent(c.picked, k -> new Rate<>(k));
+            pickedRate.win++;
+            for (Card skipped : c.skipped) {
+                Rate<Card> skipRate = map.computeIfAbsent(skipped, k -> new Rate<>(k));
+                skipRate.loss++;
+            }
+        }
+
+        private static Card[] cardChoiceBlock(CardChoice c) {
+            List<Card> losers = new ArrayList<Card>(c.skipped.size());
+            for (Card skipped : c.skipped) {
+                if (!skipped.equals(c.picked)) {
+                    losers.add(skipped);
+                }
+            }
+            if (losers.isEmpty()) {
+                return null;
+            }
+            Card[] block = new Card[losers.size() + 1];
+            block[0] = c.picked;
+            for (int i = 0; i < losers.size(); i++) {
+                block[i + 1] = losers.get(i);
+            }
+            return block;
         }
 
         private void deckStats(Run run) {
@@ -541,14 +603,22 @@ public class ClassStat {
             if (run.neowPicked != null && !run.neowSkipped.isEmpty()) {
                 Rate<Neow> pickRate = neowPickRate.computeIfAbsent(run.neowPicked, k -> new Rate<>(k));
                 pickRate.win++;
-                Map<Neow, Integer> beaten = neowBeats.computeIfAbsent(run.neowPicked,
-                        k -> new HashMap<>());
+                List<Neow> losers = new ArrayList<Neow>(run.neowSkipped.size());
                 run.neowSkipped.forEach(neow -> {
                     Rate<Neow> skipRate = neowPickRate.computeIfAbsent(neow, k -> new Rate<>(k));
                     skipRate.loss++;
-                    // 选中的这个选项，在同场时赢过每个被跳过的选项一次
-                    beaten.merge(neow, 1, Integer::sum);
+                    if (!neow.equals(run.neowPicked)) {
+                        losers.add(neow);
+                    }
                 });
+                if (!losers.isEmpty()) {
+                    Neow[] block = new Neow[losers.size() + 1];
+                    block[0] = run.neowPicked;
+                    for (int i = 0; i < losers.size(); i++) {
+                        block[i + 1] = losers.get(i);
+                    }
+                    neowChoices.add(block);
+                }
             }
         }
 
@@ -2074,10 +2144,16 @@ public class ClassStat {
 
         void finalise(ClassStat cs) {
             cs.cardPicksAct1 = sortedMapValues(cardPicksAct1);
+            cs.cardPicksAct2 = sortedMapValues(cardPicksAct2);
+            cs.cardPicksAct3_4 = sortedMapValues(cardPicksAct3_4);
             cs.cardPicksAfterAct1 = sortedMapValues(cardPicksAfterAct1);
+            cs.cardChoicesAct1.addAll(cardChoicesAct1);
+            cs.cardChoicesAct2.addAll(cardChoicesAct2);
+            cs.cardChoicesAct3_4.addAll(cardChoicesAct3_4);
+            cs.cardChoicesAfterAct1.addAll(cardChoicesAfterAct1);
             cs.cardWinRate = sortedMapValues(cardWinRate);
             cs.neowPickRate = sortedMapValues(neowPickRate);
-            cs.neowBeats.putAll(neowBeats);
+            cs.neowChoices.addAll(neowChoices);
             cs.neowWinRate = sortedMapValues(neowWinRate);
 
             cs.bossRelicPickRateAct1 = sortedMapValues(bossRelicPickRateAct1);

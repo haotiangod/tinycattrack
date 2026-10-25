@@ -26,7 +26,7 @@ import java.util.Set;
  *
  * 文件结构：
  * - 总体统计.xlsx：全角色基础、战斗与收益、删牌、当前筛选汇总、Meta 成长
- * - 第一幕卡牌选取率.xlsx / 第一幕后卡牌选取率.xlsx
+ * - 第一幕 / 第二幕 / 第三、四幕 / 第一幕后卡牌选取率.xlsx（第一幕后 = 第二至四幕合并）
  * - 卡组中的卡牌胜率.xlsx
  * - 尼奥奖励.xlsx：尼奥胜率、尼奥选取率
  * - BOSS遗物.xlsx：第一/二幕选取率、第一/二幕胜率、交换遗物胜率
@@ -48,6 +48,58 @@ public final class AllStatsExporter {
     private static final Set<String> SUMMARY_NAMES = new HashSet<String>();
     private static final Set<String> DAMAGE_TOTAL_NAMES = new HashSet<String>();
     private static final Map<String, String> CAMPFIRE_ACTIONS = new HashMap<String, String>();
+
+    /**
+     * 一份卡牌抓率工作簿的坐标：标题、模型分组 key、范围说明。
+     *
+     * 四份表共用同一套列与数值口径，只有范围不同；范围说明必须写清 floor 0
+     * 与一幕 Boss 的归属，否则读者会拿旧版 floor >= 17 的口径去对数字。
+     */
+    private static final class CardPickSpec {
+        final String name;
+        final String groupKey;
+        final String range;
+
+        CardPickSpec(String name, String groupKey, String range) {
+            this.name = name;
+            this.groupKey = groupKey;
+            this.range = range;
+        }
+    }
+
+    private static final CardPickSpec CARD_ACT1 = new CardPickSpec(
+            "第一幕卡牌选取率", "cards_act1",
+            "范围：第一幕（含 floor 0 与一幕 Boss 后的奖励屏；按每局实际 Boss 楼层判定）");
+    private static final CardPickSpec CARD_ACT2 = new CardPickSpec(
+            "第二幕卡牌选取率", "cards_act2",
+            "范围：第二幕（按每局实际 Boss 楼层判定）");
+    private static final CardPickSpec CARD_ACT3_4 = new CardPickSpec(
+            "第三、四幕卡牌选取率", "cards_act3_4",
+            "范围：第三、四幕（按每局实际 Boss 楼层判定）");
+    private static final CardPickSpec CARD_AFTER_ACT1 = new CardPickSpec(
+            "第一幕后卡牌选取率", "cards_after_act1",
+            "范围：第一幕以后（第二至四幕合并，按每局实际 Boss 楼层判定）");
+
+    /**
+     * 95%CI 可信度的分档。
+     *
+     * 用相对半宽（CI 半宽 ÷ 点估计）而不是绝对宽度：标准化率是占比，
+     * 3% 的卡和 0.1% 的卡用同一个绝对宽度衡量没有意义。
+     * 20% 与 40% 是按现有三个角色第一幕导出（139 条有效样本）定的：
+     * 相对半宽中位数 18.4%，约一半条目落在绿色；超过 40% 时点估计已经
+     * 可能偏离 1.5 倍以上，再细排名次没有意义。
+     * 零被选的卡 CI 会退化为 0 宽（看起来最“可信”），所以必须先用
+     * 被选次数兜底，否则会把它们误标成绿色。
+     */
+    private static final int CI_MIN_OFFERED = 10;
+    private static final int CI_MIN_PICKS = 3;
+    private static final double CI_GREEN_MAX = 0.20D;
+    private static final double CI_ORANGE_MAX = 0.40D;
+
+    private static final String CI_COLOR_NOTE =
+            "Excel 配色：绿色 = 可信（95%CI 半宽 ≤ 点估计的 20%，且出现 ≥ 10 次、被选 ≥ 3 次）；"
+                    + "橙色 = 一般（半宽 ≤ 40%）；红色 = 不可信（半宽 > 40%，或出现 < 10 次、被选 < 3 次）。"
+                    + "零被选条目的 CI 会退化为 0 宽，也按红色处理。";
 
     static {
         SUMMARY_NAMES.add("战斗总计");
@@ -85,10 +137,19 @@ public final class AllStatsExporter {
         TierListScope actual = scope == null ? TierListScope.ALL : scope;
         switch (actual) {
             case CARDS_ACT1:
-                writeCardPick(model, cs.cardPicksAct1, true, root);
+                writeCardPick(model, cs.cardPicksAct1, CARD_ACT1, root);
+                break;
+            case CARDS_ACT2:
+                writeCardPick(model, cs.cardPicksAct2, CARD_ACT2, root);
+                break;
+            case CARDS_ACT3_4:
+                writeCardPick(model, cs.cardPicksAct3_4, CARD_ACT3_4, root);
                 break;
             case CARDS_AFTER_ACT1:
-                writeCardPick(model, cs.cardPicksAfterAct1, false, root);
+                writeCardPick(model, cs.cardPicksAfterAct1, CARD_AFTER_ACT1, root);
+                break;
+            case CARDS_ALL_ACTS:
+                writeCardPicks(model, cs, root);
                 break;
             case BOSS_RELICS:
                 writeBossRelics(model, cs, root);
@@ -110,8 +171,7 @@ public final class AllStatsExporter {
             case ALL:
             default:
                 writeOverview(screen, model, root);
-                writeCardPick(model, cs.cardPicksAct1, true, root);
-                writeCardPick(model, cs.cardPicksAfterAct1, false, root);
+                writeCardPicks(model, cs, root);
                 writeCardWinRate(model, cs, root);
                 writeNeow(model, cs, root);
                 writeBossRelics(model, cs, root);
@@ -124,6 +184,14 @@ public final class AllStatsExporter {
                 writeCampfireUpgrade(model, cs, root);
                 break;
         }
+    }
+
+    /** 四份卡牌抓率工作簿：一幕、二幕、三、四幕、一幕以后（第二至四幕合并）。 */
+    private static void writeCardPicks(TierListModel model, ClassStat cs, File root) throws IOException {
+        writeCardPick(model, cs.cardPicksAct1, CARD_ACT1, root);
+        writeCardPick(model, cs.cardPicksAct2, CARD_ACT2, root);
+        writeCardPick(model, cs.cardPicksAct3_4, CARD_ACT3_4, root);
+        writeCardPick(model, cs.cardPicksAfterAct1, CARD_AFTER_ACT1, root);
     }
 
     private static void writeOverview(MoreStatsScreen screen, TierListModel model, File root) throws IOException {
@@ -298,17 +366,109 @@ public final class AllStatsExporter {
         metaLine(sheet, "学习课最大成长", cs.metaScaling.maxLesson, "");
     }
 
-    private static void writeCardPick(TierListModel model, List<Rate<Card>> rates, boolean act1, File root) throws IOException {
-        String name = act1 ? "第一幕卡牌选取率" : "第一幕后卡牌选取率";
+    /**
+     * 置信区间可信度：0 红、1 绿、2 橙、-1 不上色。
+     *
+     * point / low / high 必须同单位（这里都是百分点），因为只用到相对半宽。
+     */
+    private static int ciReliability(int offered, int picked, double point, double low, double high) {
+        if (offered < CI_MIN_OFFERED || picked < CI_MIN_PICKS || point <= 0.0D || high <= low) {
+            return XlsxWriter.RELIABILITY_LOW;
+        }
+        double relative = (high - low) / (2.0D * point);
+        if (relative <= CI_GREEN_MAX + 1e-9D) {
+            return XlsxWriter.RELIABILITY_HIGH;
+        }
+        if (relative <= CI_ORANGE_MAX + 1e-9D) {
+            return XlsxWriter.RELIABILITY_MEDIUM;
+        }
+        return XlsxWriter.RELIABILITY_LOW;
+    }
+
+    private static String ciReliabilityLabel(int level) {
+        return level == XlsxWriter.RELIABILITY_HIGH ? "可信"
+                : level == XlsxWriter.RELIABILITY_MEDIUM ? "一般" : "不可信";
+    }
+
+    private static void writeCardPick(TierListModel model, List<Rate<Card>> rates,
+                                      CardPickSpec spec, File root) throws IOException {
+        String name = spec.name;
+        Map<String, TierEntry> standard = cardStandard(model, spec.groupKey);
         XlsxWriter wb = new XlsxWriter();
         XlsxWriter.Sheet sheet = newSheet(wb, name, name,
-                pageContext(model, act1 ? "范围：第一幕（floor < 17）" : "范围：第一幕后（floor ≥ 17）"),
-                "排名", "中文名", "英文名", "选取次数", "跳过次数", "提供次数", "选取率");
-        int count = writePickRows(sheet, rates, 200, model.minSample);
+                pageContext(model, spec.range)
+                        + "标准化率 = Plackett-Luce 强度占比：每次「3 张牌 + 跳过」是一个选择集，"
+                        + "选中某张的概率 = 它的强度 ÷ 同屏所有选项强度之和；"
+                        + "剔除「同场另外两张有多强」造成的偏差；合计 100%，与选取率不是同一量纲，不能互相替代。"
+                        + "四组分别拟合、各自合计 100%，不能把二幕 + 三、四幕相加当作第一幕后。"
+                        + "95%CI 来自整屏 bootstrap(1000)：一次奖励屏整组重采样，"
+                        + "不会把同一个决定当成多份独立证据。SKIP 与颂钵（并入 SKIP）每次奖励都在场，已计入对手。"
+                        + "未校正：同一局第 2 张起平均少抓 12pp，对名次影响约 0.5~1 位。"
+                        + "空白 = 该条目不在标准化表内（被诅咒/状态过滤，或颂钵并入了 SKIP）。"
+                        + CI_COLOR_NOTE,
+                "排名", "中文名", "英文名", "选取次数", "跳过次数", "提供次数", "选取率",
+                "标准化率", "95%CI 下", "95%CI 上", "CI 可信度");
+        int count = writeCardPickRows(sheet, rates, 200, model.minSample, standard);
         if (count == 0) {
             noData(sheet);
         }
         wb.write(new File(root, name + ".xlsx"));
+    }
+
+    /** 卡牌表：条目 id → 已挂好标准化率的 TierEntry（来自同一个 TierListModel，不重复拟合）。 */
+    private static Map<String, TierEntry> cardStandard(TierListModel model, String groupKey) {
+        Map<String, TierEntry> out = new HashMap<String, TierEntry>();
+        if (model == null || model.groups == null) {
+            return out;
+        }
+        for (TierListGroup group : model.groups) {
+            if (!groupKey.equals(group.key)) {
+                continue;
+            }
+            for (TierEntry entry : group.entries) {
+                if (entry.standardized >= 0.0D) {
+                    out.put(entry.id, entry);
+                }
+            }
+        }
+        return out;
+    }
+
+    private static int writeCardPickRows(XlsxWriter.Sheet sheet, List<Rate<Card>> rates,
+                                         int limit, int minSample, Map<String, TierEntry> standard) {
+        if (rates == null) {
+            return 0;
+        }
+        int count = 0;
+        int len = limit > 0 ? Math.min(rates.size(), limit) : rates.size();
+        for (int i = 0; i < len; i++) {
+            Rate<Card> rate = rates.get(i);
+            if (rate == null || rate.what == null || rate.getSampleSize() < minSample) {
+                continue;
+            }
+            count++;
+            TierEntry entry = standard.get(rate.what.name);
+            int level = XlsxWriter.RELIABILITY_NONE;
+            XlsxWriter.Cell reliability = XlsxWriter.Cell.text("—");
+            if (entry != null) {
+                level = ciReliability(rate.total(), rate.win,
+                        entry.standardized, entry.stdLow, entry.stdHigh);
+                reliability = XlsxWriter.Cell.reliability(ciReliabilityLabel(level), level);
+            }
+            sheet.dataTinted(level,
+                    XlsxWriter.Cell.integer(count),
+                    XlsxWriter.Cell.text(rateZh(rate.what)),
+                    XlsxWriter.Cell.text(rateEn(rate.what)),
+                    XlsxWriter.Cell.integer(rate.win),
+                    XlsxWriter.Cell.integer(rate.loss),
+                    XlsxWriter.Cell.integer(rate.total()),
+                    XlsxWriter.Cell.percent(ratio(rate.win, rate.total())),
+                    entry == null ? XlsxWriter.Cell.text("") : XlsxWriter.Cell.percent(entry.standardized / 100.0D),
+                    entry == null ? XlsxWriter.Cell.text("") : XlsxWriter.Cell.percent(entry.stdLow / 100.0D),
+                    entry == null ? XlsxWriter.Cell.text("") : XlsxWriter.Cell.percent(entry.stdHigh / 100.0D),
+                    reliability);
+        }
+        return count;
     }
 
     private static void writeCardWinRate(TierListModel model, ClassStat cs, File root) throws IOException {
@@ -328,10 +488,14 @@ public final class AllStatsExporter {
         String context = pageContext(model,
                 "口径：一行 = 一个「奖励 + 代价」选项，不同代价算不同选项、不合并。"
                         + "出现次数 = 该选项被选中 + 被跳过的次数；简单率 = 被选 ÷ 出现。"
-                        + "标准化率 = Bradley-Terry 强度占比：把每局「1 选中 + 3 跳过」拆成 3 场两两对决来估计，"
-                        + "用来剔除「老和强选项同场」造成的低估。"
-                        + "两个区间都是 95%：简单率用 Wilson 区间，标准化率用配对矩阵 bootstrap(100)。"
-                        + "两条 CI 重叠时，名次差不能当成真实差异。");
+                        + "标准化率 = 层级 Plackett-Luce 后验均值：每局「1 选中 + 3 跳过」是一个选择集，"
+                        + "选中某个的概率 = 它的强度 ÷ 同屏所有选项强度之和；用它剔除「老和强选项同场」造成的低估。"
+                        + "全胜选项没有有限的最大似然解，普通 PL 的名次由「+1 假想胜场」的先验决定；"
+                        + "这里给 log 强度加 log-normal 先验，尺度由 5 折交叉验证（按对局分组）选定，"
+                        + "95% 可信区间与 P(第一) 来自 Laplace 后验抽样。"
+                        + "「并列」= 与组首相比胜出的把握不足 95%；组内按出现次数从多到少排，样本越大越可信。"
+                        + "简单率区间用 Wilson 区间。两条区间重叠时，名次差不能当成真实差异。"
+                        + CI_COLOR_NOTE);
         XlsxWriter.Sheet win = newSheet(wb, "尼奥胜率", "尼奥开局选项 · 胜率", context,
                 "排名", "中文名", "英文名", "胜场", "败场", "对局数", "胜率");
         int winCount = writeWinRows(win, cs.neowWinRate, 0, model.minSample);
@@ -342,7 +506,7 @@ public final class AllStatsExporter {
         List<NeowRanker.Row> rows = NeowRanker.rank(cs, model.minSample);
         if (rows.isEmpty()) {
             XlsxWriter.Sheet empty = newSheet(wb, "简单率", "尼奥开局选项 · 简单率", context,
-                    "排名", "中文名", "英文名", "出现", "被选", "简单率", "95%CI 下", "95%CI 上");
+                    "排名", "中文名", "英文名", "出现", "被选", "简单率", "95%CI 下", "95%CI 上", "CI 可信度");
             noData(empty);
             wb.write(new File(root, "尼奥奖励.xlsx"));
             return;
@@ -357,11 +521,12 @@ public final class AllStatsExporter {
             }
         });
         XlsxWriter.Sheet simple = newSheet(wb, "简单率", "尼奥开局选项 · 简单率（按出现时被选比例）", context,
-                "排名", "中文名", "英文名", "出现", "被选", "简单率", "95%CI 下", "95%CI 上");
+                "排名", "中文名", "英文名", "出现", "被选", "简单率", "95%CI 下", "95%CI 上", "CI 可信度");
         int rank = 0;
         for (NeowRanker.Row row : bySimple) {
             rank++;
-            simple.data(
+            int level = ciReliability(row.offered, row.picked, row.simple, row.simpleLow, row.simpleHigh);
+            simple.dataTinted(level,
                     XlsxWriter.Cell.integer(rank),
                     XlsxWriter.Cell.text(NeowShort.zh(row.neow.bonus, row.neow.cost)),
                     XlsxWriter.Cell.text(NeowShort.en(row.neow.bonus, row.neow.cost)),
@@ -369,22 +534,25 @@ public final class AllStatsExporter {
                     XlsxWriter.Cell.integer(row.picked),
                     XlsxWriter.Cell.percent(row.simple / 100.0D),
                     XlsxWriter.Cell.percent(row.simpleLow / 100.0D),
-                    XlsxWriter.Cell.percent(row.simpleHigh / 100.0D));
+                    XlsxWriter.Cell.percent(row.simpleHigh / 100.0D),
+                    XlsxWriter.Cell.reliability(ciReliabilityLabel(level), level));
         }
 
-        // 表二：标准化率（按 BT 强度降序），附简单率与名次变动
+        // 表二：标准化率（按 PL 强度降序），附简单率与名次变动
         Map<NeowRanker.Row, Integer> simpleRank = new java.util.IdentityHashMap<NeowRanker.Row, Integer>();
         for (int i = 0; i < bySimple.size(); i++) {
             simpleRank.put(bySimple.get(i), i + 1);
         }
-        XlsxWriter.Sheet std = newSheet(wb, "标准化率", "尼奥开局选项 · 标准化率（Bradley-Terry）", context,
+        XlsxWriter.Sheet std = newSheet(wb, "标准化率", "尼奥开局选项 · 标准化率（层级 Plackett-Luce）", context,
                 "排名", "中文名", "英文名", "标准化率", "95%CI 下", "95%CI 上",
-                "简单率", "简单排名", "名次变动", "出现");
+                "简单率", "简单排名", "名次变动", "出现", "并列", "P(第一)", "CI 可信度");
         rank = 0;
         for (NeowRanker.Row row : rows) {
             rank++;
             int sr = simpleRank.containsKey(row) ? simpleRank.get(row) : 0;
-            std.data(
+            int level = ciReliability(row.offered, row.picked,
+                    row.standardized, row.standardizedLow, row.standardizedHigh);
+            std.dataTinted(level,
                     XlsxWriter.Cell.integer(rank),
                     XlsxWriter.Cell.text(NeowShort.zh(row.neow.bonus, row.neow.cost)),
                     XlsxWriter.Cell.text(NeowShort.en(row.neow.bonus, row.neow.cost)),
@@ -394,7 +562,11 @@ public final class AllStatsExporter {
                     XlsxWriter.Cell.percent(row.simple / 100.0D),
                     XlsxWriter.Cell.integer(sr),
                     XlsxWriter.Cell.integer(sr - rank),
-                    XlsxWriter.Cell.integer(row.offered));
+                    XlsxWriter.Cell.integer(row.offered),
+                    XlsxWriter.Cell.text(row.tied()
+                            ? "并列 " + row.tieStart + "–" + row.tieEnd : "—"),
+                    XlsxWriter.Cell.percent(row.rankOne),
+                    XlsxWriter.Cell.reliability(ciReliabilityLabel(level), level));
         }
         wb.write(new File(root, "尼奥奖励.xlsx"));
     }

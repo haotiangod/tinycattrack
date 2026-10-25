@@ -26,9 +26,9 @@ import java.util.Map;
  * 从 ClassStat 组装 Tier List 导出数据。
  *
  * 重要口径（已与用户确认）：
- * - 卡牌第一幕 / 第一幕后：直接复用 ClassStat.cardPicksAct1 / cardPicksAfterAct1，
- *   不重新按 Run.getAct(floor) 分幕。现有聚合用 floor >= 17 作为“第一幕后”，
- *   与统计屏现有数字保持一致。
+ * - 卡牌按实际幕拆成第一幕 / 第二幕 / 第三、四幕，另给一份「第一幕后」（第二至四幕合并）。
+ *   分幕一律用 ClassStat 里已经按 Run.getAct(floor) 归好类的数据：一幕包含 floor 0，
+ *   也包含一幕 Boss 后的奖励屏（真实数据里 Boss 在 17 层，不能用 floor >= 17 硬切）。
  * - Boss 遗物：复用 bossRelicPickRateAct1 / Act2。
  * - SKIP 保留；Singing Bowl（颂钵）并入 SKIP 桶，因为它本质也是“跳过拿牌”。
  * - CURSE / STATUS 卡从卡牌 Tier List 剔除。
@@ -87,18 +87,36 @@ public final class TierListBuilder {
         if (scope == TierListScope.NEOW) {
             groups.add(buildNeow(cs, minSample));
         }
-        if (scope == TierListScope.ALL || scope == TierListScope.CARDS_ACT1) {
+        if (wantsCardGroup(scope, TierListScope.CARDS_ACT1)) {
             groups.add(buildCards("cards_act1",
                     "Card pick rate - Act 1",
                     "第一幕卡牌选取率",
                     cs.cardPicksAct1,
+                    cs.cardChoicesAct1,
                     minSample));
         }
-        if (scope == TierListScope.ALL || scope == TierListScope.CARDS_AFTER_ACT1) {
+        if (wantsCardGroup(scope, TierListScope.CARDS_ACT2)) {
+            groups.add(buildCards("cards_act2",
+                    "Card pick rate - Act 2",
+                    "第二幕卡牌选取率",
+                    cs.cardPicksAct2,
+                    cs.cardChoicesAct2,
+                    minSample));
+        }
+        if (wantsCardGroup(scope, TierListScope.CARDS_ACT3_4)) {
+            groups.add(buildCards("cards_act3_4",
+                    "Card pick rate - Acts 3-4",
+                    "第三、四幕卡牌选取率",
+                    cs.cardPicksAct3_4,
+                    cs.cardChoicesAct3_4,
+                    minSample));
+        }
+        if (wantsCardGroup(scope, TierListScope.CARDS_AFTER_ACT1)) {
             groups.add(buildCards("cards_after_act1",
                     "Card pick rate - After Act 1",
                     "第一幕后卡牌选取率",
                     cs.cardPicksAfterAct1,
+                    cs.cardChoicesAfterAct1,
                     minSample));
         }
         if (scope == TierListScope.ALL || scope == TierListScope.BOSS_RELICS) {
@@ -136,10 +154,18 @@ public final class TierListBuilder {
                 groups);
     }
 
+    /** ALL 与卡牌打包页都出全套四组；单独导出某一幕时只出那一组。 */
+    private static boolean wantsCardGroup(TierListScope scope, TierListScope group) {
+        return scope == TierListScope.ALL
+                || scope == TierListScope.CARDS_ALL_ACTS
+                || scope == group;
+    }
+
     private static TierListGroup buildCards(String key,
                                             String labelEn,
                                             String labelZh,
                                             List<Rate<Card>> rates,
+                                            List<Card[]> choices,
                                             int minSample) {
         // LinkedHashMap 保证同名条目只出现一次；int[0] = picked, int[1] = offered
         Map<String, int[]> counts = new LinkedHashMap<String, int[]>();
@@ -195,6 +221,8 @@ public final class TierListBuilder {
             entries.add(new TierEntry(name, nameEn, nameZh, offered, picked, rate, tier, type));
         }
         sortEntries(entries);
+        // 标准化率：按「同场三张 + 跳过」的整屏选择拟合（Plackett-Luce），挂到条目上
+        CardRanker.attach(choices, entries);
         return new TierListGroup(key, labelEn, labelZh, entries);
     }
 
@@ -679,7 +707,7 @@ public final class TierListBuilder {
                 "Neow options (bonus + cost)",
                 "尼奥开局选项（奖励 + 代价）",
                 items, minSample);
-        // 把 Bradley-Terry 标准化率与 95%CI 挂到条目上，CSV/JSON/图片/HTML 都能读到
+        // 把 Plackett-Luce 标准化率与 95%CI 挂到条目上，CSV/JSON/图片/HTML 都能读到
         Map<String, NeowRanker.Row> ranked = new LinkedHashMap<String, NeowRanker.Row>();
         for (NeowRanker.Row row : NeowRanker.rank(cs, minSample)) {
             ranked.put(row.neow.bonus + "_" + row.neow.cost, row);
@@ -690,10 +718,14 @@ public final class TierListBuilder {
                 entry.standardized = row.standardized;
                 entry.stdLow = row.standardizedLow;
                 entry.stdHigh = row.standardizedHigh;
+                entry.tieGroup = row.tieGroup;
+                entry.tied = row.tied();
+                entry.rankOne = row.rankOne;
                 // CSV 没有独立列，把标准化率写进备注，保证任何导出都能看到
                 entry.context = String.format(java.util.Locale.US,
-                        "标准化 %.2f%% (95%%CI %.2f–%.2f)",
-                        row.standardized, row.standardizedLow, row.standardizedHigh);
+                        "标准化 %.2f%% (95%%CI %.2f–%.2f)%s",
+                        row.standardized, row.standardizedLow, row.standardizedHigh,
+                        row.tied() ? " 并列" : "");
             }
         }
         return group;

@@ -40,7 +40,7 @@ var stsJar: String = "$stsInstallLocation/desktop-1.0.jar"
 var modName: String = rootProject.name
 
 // 自定义版本号，每次测试时修改此处
-var versionTag: String = "V4.5.3"
+var versionTag: String = "V4.5.6"
 
 // JAR 文件命名：使用 ModTheSpire.json 中的 modid
 var jarBaseName: String = "TinyCat"

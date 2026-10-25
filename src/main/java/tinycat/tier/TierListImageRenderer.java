@@ -44,13 +44,14 @@ public final class TierListImageRenderer {
 
     public static void write(TierListModel model, File root) throws Exception {
         BufferedImage image = render(model, root, model.groups);
-        ImageIO.write(image, "png", new File(root, "tierlist.png"));
-        writeJpeg(image, new File(root, "tierlist.jpg"), 0.92F);
+        String base = model.standardized ? "tierlist" + RateVariant.FILE_SUFFIX : "tierlist";
+        ImageIO.write(image, "png", new File(root, base + ".png"));
+        writeJpeg(image, new File(root, base + ".jpg"), 0.92F);
     }
 
     /** 渲染指定分组；供「一图完整」与「按指标分图」复用。 */
     static BufferedImage render(TierListModel model, File root, List<TierListGroup> groups) {
-        int height = layoutHeight(groups, model.scope);
+        int height = layoutHeight(groups, model.scope, model.standardized);
         BufferedImage image = new BufferedImage(WIDTH, height, BufferedImage.TYPE_INT_RGB);
         Graphics2D g = image.createGraphics();
         try {
@@ -63,7 +64,12 @@ public final class TierListImageRenderer {
 
     /** 单段高度（不含其它段落），供整图拼接预算画布。 */
     static int sectionHeight(List<TierListGroup> groups) {
-        return layoutHeight(groups, null);
+        return sectionHeight(groups, null, false);
+    }
+
+    /** 标准化视图用排名档（RS..RZ，卡牌另有 R00），高度必须按同一套档位算，否则画布会短一截。 */
+    static int sectionHeight(List<TierListGroup> groups, TierListScope scope, boolean standardized) {
+        return layoutHeight(groups, scope, standardized);
     }
 
     /**
@@ -87,11 +93,12 @@ public final class TierListImageRenderer {
         }
         g.setColor(MUTED);
         g.setFont(font(12, Font.PLAIN));
-        g.drawString("TinyCat 4.2.2 · local export · no external image source", PAD, height - 24);
+        g.drawString("TinyCat " + TierListExporter.MOD_VERSION
+                + " · local export · no external image source", PAD, height - 24);
     }
 
-    private static int layoutHeight(List<TierListGroup> groups, TierListScope scope) {
-        List<Tier> tiers = TierListExporter.tiersFor(scope);
+    private static int layoutHeight(List<TierListGroup> groups, TierListScope scope, boolean standardized) {
+        List<Tier> tiers = TierListExporter.tiersFor(scope, standardized);
         int height = PAD + 150;
         for (TierListGroup group : groups) {
             height += 54;
@@ -113,9 +120,15 @@ public final class TierListImageRenderer {
         g.setColor(GOLD);
         g.setFont(font(34, Font.BOLD));
         g.drawString("TinyCat Tier List", PAD, y + 34);
+        if (model.standardized) {
+            // 同一份数据的第二张图，必须一眼看出是哪个口径，否则两张图会被当成重名
+            g.setColor(new Color(0x7fd1e8));
+            g.setFont(font(22, Font.BOLD));
+            g.drawString("标准化率 STANDARDIZED", PAD + 340, y + 32);
+        }
         g.setColor(MUTED);
         g.setFont(font(16, Font.PLAIN));
-        g.drawString(metricSubtitle(model.scope), PAD, y + 60);
+        g.drawString(metricSubtitle(model), PAD, y + 60);
 
         y += 82;
         g.setFont(font(13, Font.PLAIN));
@@ -136,8 +149,13 @@ public final class TierListImageRenderer {
         y += 22;
         g.setColor(MUTED);
         g.setFont(font(12, Font.PLAIN));
-        g.drawString(metricNote(model.scope) + "图片全部来自本地游戏，不依赖外部图源。", PAD, y);
+        g.drawString(metricNote(model) + "图片全部来自本地游戏，不依赖外部图源。", PAD, y);
         return y + 22;
+    }
+
+    private static String metricSubtitle(TierListModel model) {
+        String base = metricSubtitle(model.scope);
+        return model.standardized ? base + " · 标准化率" : base;
     }
 
     private static String metricSubtitle(TierListScope scope) {
@@ -157,6 +175,15 @@ public final class TierListImageRenderer {
             return "全量梯度 · local run history export";
         }
         return "抓率梯度 · local run history export";
+    }
+
+    private static String metricNote(TierListModel model) {
+        if (!model.standardized) {
+            return metricNote(model.scope);
+        }
+        return "数值 = Plackett-Luce 标准化率（整屏选择拟合，合计 100%）；副标 = 原始计数与 95%CI。"
+                + "每组独立拟合、各自合计 100%，不能跨组相加。"
+                + "它回答「谁更值得选」，与界面占比回答的「实际点了哪个」不是同一个问题。";
     }
 
     private static String metricNote(TierListScope scope) {
@@ -202,7 +229,7 @@ public final class TierListImageRenderer {
         }
 
         boolean countPrimary = countPrimary(model.scope);
-        for (Tier tier : TierListExporter.tiersFor(model.scope)) {
+        for (Tier tier : TierListExporter.tiersFor(model.scope, model.standardized)) {
             List<TierEntry> entries = group.entriesOf(tier);
             int count = entries.size();
             Color tierColor = Color.decode(tier.color);

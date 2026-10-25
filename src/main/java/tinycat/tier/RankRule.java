@@ -57,6 +57,9 @@ public enum RankRule {
     /** JENKS 规则的档数（S/A/B/C/D 五档）。 */
     public static final int JENKS_K = 5;
 
+    /** 标准化卡牌视图里 <1% 长尾的档数：R0 / R00。 */
+    public static final int STANDARD_TAIL_K = 2;
+
     public final String labelZh;
     public final String labelEn;
     public final String noteZh;
@@ -183,6 +186,69 @@ public enum RankRule {
         return out;
     }
 
+    /**
+     * 标准化率视图（卡牌）的分档：≥ 1% 走 Jenks k=5，< 1% 的长尾再切一档，共 7 档。
+     *
+     * 为什么长尾要单独切：标准化率合计 100%，卡牌条目又多，一半以上落在 1% 以下，
+     * 只留一个 R0 会让最低档装下 50+ 张卡（实测机器人第一幕 58 张），末尾一栏失去分辨率。
+     * 长尾跨两个数量级（0.01%~1%），所以切点在 log10 上算：直接在原始数值上切，
+     * Jenks 只会把 0.3%~1% 拎出去，剩下的 0.01%~0.3% 仍是一整块。
+     *
+     * @param values 已按标准化率降序排序的数值
+     * @return 与 values 一一对应的档位（RS..RD / RZ / RZZ）
+     */
+    public static List<Tier> assignStandardized(List<Double> values) {
+        int n = values == null ? 0 : values.size();
+        List<Tier> out = new ArrayList<Tier>(n);
+        if (n == 0) {
+            return out;
+        }
+        for (int i = 0; i < n; i++) {
+            out.add(Tier.RZ);
+        }
+
+        List<Integer> highIndex = new ArrayList<Integer>();
+        List<Double> high = new ArrayList<Double>();
+        List<Integer> tailIndex = new ArrayList<Integer>();
+        List<Double> tail = new ArrayList<Double>();
+        for (int i = 0; i < n; i++) {
+            Double value = values.get(i);
+            double v = value == null ? 0.0D : value.doubleValue();
+            if (v >= 1.0D) {
+                highIndex.add(Integer.valueOf(i));
+                high.add(value);
+            } else {
+                tailIndex.add(Integer.valueOf(i));
+                tail.add(Double.valueOf(Math.log10(Math.max(v, 1.0e-9D))));
+            }
+        }
+
+        if (!high.isEmpty()) {
+            int[] seg = segments(high, JENKS_K);
+            int groups = Math.min(JENKS_K, distinctCount(high));
+            for (int j = 0; j < high.size(); j++) {
+                int tierIndex = groups - 1 - seg[j];
+                if (tierIndex < 0) {
+                    tierIndex = 0;
+                }
+                if (tierIndex > RANK_TIERS.length - 1) {
+                    tierIndex = RANK_TIERS.length - 1;
+                }
+                out.set(highIndex.get(j).intValue(), RANK_TIERS[tierIndex]);
+            }
+        }
+
+        if (!tail.isEmpty()) {
+            int[] seg = segments(tail, STANDARD_TAIL_K);
+            int groups = Math.min(STANDARD_TAIL_K, distinctCount(tail));
+            for (int j = 0; j < tail.size(); j++) {
+                // seg 0 = 最低段；只有确实切出两段时才把下半段给 R00
+                out.set(tailIndex.get(j).intValue(), groups > 1 && seg[j] == 0 ? Tier.RZZ : Tier.RZ);
+            }
+        }
+        return out;
+    }
+
     /** 排名型档位，下标 0 = 最高档。 */
     private static final Tier[] RANK_TIERS = {Tier.RS, Tier.RA, Tier.RB, Tier.RC, Tier.RD};
 
@@ -200,6 +266,38 @@ public enum RankRule {
      * 实测 32 张表：档内跨度中位 1.50（等人数 2.29）、空档 0 个（数值四分位 5 个）。
      */
     private static List<Tier> jenks(List<Double> values, int k) {
+        int[] seg = segments(values, k);
+        int groups = Math.min(k, distinctCount(values));
+        List<Tier> out = new ArrayList<Tier>(values.size());
+        for (int i = 0; i < values.size(); i++) {
+            int tierIndex = groups - 1 - seg[i];
+            if (tierIndex < 0) {
+                tierIndex = 0;
+            }
+            if (tierIndex > RANK_TIERS.length - 1) {
+                tierIndex = RANK_TIERS.length - 1;
+            }
+            out.add(RANK_TIERS[tierIndex]);
+        }
+        return out;
+    }
+
+    /** 不同数值个数（null 按 0 计），用于判断实际能切出几段。 */
+    private static int distinctCount(List<Double> values) {
+        java.util.HashSet<Double> seen = new java.util.HashSet<Double>();
+        for (Double value : values) {
+            seen.add(Double.valueOf(value == null ? 0.0D : value.doubleValue()));
+        }
+        return seen.size();
+    }
+
+    /**
+     * Fisher-Jenks 分段，返回与输入一一对应的段号（0 = 数值最低的一段）。
+     *
+     * @param values 任意顺序的数值；内部会按升序去重后做 DP
+     * @param k      目标段数
+     */
+    private static int[] segments(List<Double> values, int k) {
         int n = values.size();
         double[] asc = new double[n];
         for (int i = 0; i < n; i++) {
@@ -267,8 +365,8 @@ public enum RankRule {
             cursor = back[j][cursor];
         }
 
-        // 5) 按数值回查档位：段号越大 = 数值越高 = 档位越高
-        List<Tier> out = new ArrayList<Tier>(n);
+        // 5) 按数值回查段号（0 = 最低段），与输入顺序一一对应
+        int[] out = new int[n];
         for (int i = 0; i < n; i++) {
             Double v = values.get(i);
             double value = v == null ? 0.0D : v.doubleValue();
@@ -285,14 +383,7 @@ public enum RankRule {
                     seg = j;
                 }
             }
-            int tierIndex = groups - seg;
-            if (tierIndex < 0) {
-                tierIndex = 0;
-            }
-            if (tierIndex > RANK_TIERS.length - 1) {
-                tierIndex = RANK_TIERS.length - 1;
-            }
-            out.add(RANK_TIERS[tierIndex]);
+            out[i] = seg - 1;
         }
         return out;
     }

@@ -34,6 +34,8 @@ import java.util.zip.ZipOutputStream;
  *     ├── 图表/                        # 00-完整梯度图 + 按指标页分图（png/jpg）
  *     ├── 总体统计.xlsx
  *     ├── 第一幕卡牌选取率.xlsx
+ *     ├── 第二幕卡牌选取率.xlsx
+ *     ├── 第三、四幕卡牌选取率.xlsx
  *     ├── 第一幕后卡牌选取率.xlsx
  *     ├── ...（其余按统计界面分页的中文 Excel）
  *     └── images/
@@ -48,7 +50,7 @@ import java.util.zip.ZipOutputStream;
 public final class TierListExporter {
     private static final String EXPORT_ROOT = "tierlist-export";
     /** 从 jar 里的 ModTheSpire.json 读版本，避免导出页面永远显示旧版本号。 */
-    private static final String MOD_VERSION = readModVersion();
+    static final String MOD_VERSION = readModVersion();
 
     private static String readModVersion() {
         try (java.io.InputStream in = TierListExporter.class.getResourceAsStream("/ModTheSpire.json")) {
@@ -69,6 +71,8 @@ public final class TierListExporter {
     private static final String[] STAT_FILES = {
             "总体统计.xlsx",
             "第一幕卡牌选取率.xlsx",
+            "第二幕卡牌选取率.xlsx",
+            "第三、四幕卡牌选取率.xlsx",
             "第一幕后卡牌选取率.xlsx",
             "卡组中的卡牌胜率.xlsx",
             "尼奥奖励.xlsx",
@@ -89,17 +93,25 @@ public final class TierListExporter {
      * 该范围用哪些档位渲染。
      *
      * 抓率型（卡牌 / BOSS 遗物）用 S..F + 0；排名型（火堆 / 商店 / 尼奥）用 RS..RD。
-     * 两套档位不能混在一张表里，否则每张表会多出 8 行空档。
+     * 标准化率是强度占比，量级与抓率完全不同（不是 0~100% 的实际被选比例），
+     * 所以标准化视图统一用排名档，否则卡牌表会拿 S..F 去套 RS..RZ 的条目，整张表全空。
      */
-    public static List<Tier> tiersFor(TierListScope scope) {
+    public static List<Tier> tiersFor(TierListScope scope, boolean standardized) {
         List<Tier> out = new ArrayList<Tier>();
-        boolean rank = scope != null && scope.isRankBased();
+        boolean rank = standardized || (scope != null && scope.isRankBased());
+        // R00 只出现在卡牌标准化视图里：长尾切成两档后整表 7 档，
+        // 其它视图没有这么多 <1% 条目，列出来也只会是空行。
+        boolean splitTail = standardized && (scope == null || scope.splitsStandardTail());
         for (Tier tier : Tier.values()) {
-            if (tier.isRankBased() == rank) {
+            if (tier.isRankBased() == rank && (tier != Tier.RZZ || splitTail)) {
                 out.add(tier);
             }
         }
         return out;
+    }
+
+    public static List<Tier> tiersFor(TierListScope scope) {
+        return tiersFor(scope, false);
     }
 
     public static String export(MoreStatsScreen screen) throws Exception {
@@ -139,6 +151,9 @@ public final class TierListExporter {
                     entry.imagePath = imageExporter.export(entry);
                 }
             }
+            // 必须在图片导出之后构建：标准化视图复制条目时会把 imagePath 一起带走，
+            // 早建会让第二份视图每张卡都缺图
+            TierListModel standard = RateVariant.standardized(model);
             writeCsv(model, new File(root, "data.csv"));
             writeJson(model, new File(root, "data.json"));
             AllStatsExporter.write(screen, model, root, model.scope);
@@ -154,17 +169,24 @@ public final class TierListExporter {
             }
             try {
                 TierListImageRenderer.write(model, root);
+                if (standard != null) {
+                    // 第二张整图：同一份数据的标准化率视图（tierlist_standardized.png / .jpg）
+                    TierListImageRenderer.write(standard, root);
+                }
             } catch (Exception t) {
                 tinycat.logger.warn("TierList: failed to render shareable image", t);
             }
             try {
                 // 图表/：一张完整图 + 按前端指标页的分图（含怪物危险度）
-                ExportImagePack.write(model, monsterTier, root);
+                ExportImagePack.write(model, standard, monsterTier, root);
             } catch (Exception t) {
                 tinycat.logger.warn("TierList: failed to render chart pack", t);
             }
-            writeHtml(model, new File(root, "tierlist.html"));
-            writeReadme(model, new File(root, "README.txt"));
+            writeHtml(model, new File(root, "tierlist.html"), standard != null);
+            if (standard != null) {
+                writeHtml(standard, new File(root, "tierlist" + RateVariant.FILE_SUFFIX + ".html"), true);
+            }
+            writeReadme(model, new File(root, "README.txt"), standard != null);
         } finally {
             imageExporter.dispose();
         }
@@ -198,9 +220,12 @@ public final class TierListExporter {
             } else if (rank && model.scope == TierListScope.CAMPFIRE_UPGRADE) {
                 writer.write("角色ID,角色类型,种子局筛选,分组,类型,条目ID,英文名,中文名,候选次数,被敲次数,火堆权重(%),梯度,备注(占锻造/占火堆),图片\n");
             } else {
+                // 标准化率三列对没有标准化口径的表（BOSS 遗物）留空，但列位固定：
+                // 同一份导出的 CSV 只该有一种列顺序，读者不该按 scope 猜第几列是什么
                 writer.write(rank
                         ? "角色ID,角色类型,种子局筛选,分组,类型,条目ID,英文名,中文名,分母(总次数),次数,占比(%),梯度,备注,图片\n"
-                        : "角色ID,角色类型,种子局筛选,分组,类型,条目ID,英文名,中文名,提供次数,选取次数,选取率(%),梯度,图片\n");
+                        : "角色ID,角色类型,种子局筛选,分组,类型,条目ID,英文名,中文名,提供次数,选取次数,选取率(%),梯度,"
+                        + "标准化率(%),标准化CI下(%),标准化CI上(%),备注,图片\n");
             }
             for (TierListGroup group : model.groups) {
                 for (TierEntry entry : group.entries) {
@@ -229,6 +254,16 @@ public final class TierListExporter {
                     writer.write(csv(entry.tier == null ? "" : entry.tier.key));
                     writer.write(',');
                     if (rank) {
+                        writer.write(csv(entry.context));
+                        writer.write(',');
+                    } else {
+                        boolean hasStandard = entry.standardized >= 0.0D;
+                        writer.write(hasStandard ? formatRate(entry.standardized) : "");
+                        writer.write(',');
+                        writer.write(hasStandard ? formatRate(entry.stdLow) : "");
+                        writer.write(',');
+                        writer.write(hasStandard ? formatRate(entry.stdHigh) : "");
+                        writer.write(',');
                         writer.write(csv(entry.context));
                         writer.write(',');
                     }
@@ -279,7 +314,7 @@ public final class TierListExporter {
         root.put("run_count", model.runCount);
 
         List<Map<String, Object>> tiers = new ArrayList<Map<String, Object>>();
-        for (Tier tier : tiersFor(model.scope)) {
+        for (Tier tier : tiersFor(model.scope, model.standardized)) {
             Map<String, Object> item = new LinkedHashMap<String, Object>();
             item.put("key", tier.key);
             item.put("label_en", tier.labelEn);
@@ -309,7 +344,7 @@ public final class TierListExporter {
                 item.put("pick_rate_pct", round2(entry.rate));
                 item.put("tier", entry.tier == null ? "" : entry.tier.key);
                 if (entry.standardized >= 0.0D) {
-                    // 只有尼奥表有标准化口径（Bradley-Terry）
+                    // 尼奥与卡牌表都有标准化口径（Plackett-Luce 强度占比，合计 100%）
                     item.put("standardized_pct", round2(entry.standardized));
                     item.put("standardized_ci_low_pct", round2(entry.stdLow));
                     item.put("standardized_ci_high_pct", round2(entry.stdHigh));
@@ -333,12 +368,23 @@ public final class TierListExporter {
         writeString(file, json);
     }
 
-    private static void writeHtml(TierListModel model, File file) throws IOException {
+    /** 包内可见：导出与自检（scripts 里的假模型测试）共用同一份渲染逻辑。 */
+    static void writeHtml(TierListModel model, File file) throws IOException {
+        writeHtml(model, file, false);
+    }
+
+    /**
+     * @param hasOtherVariant 本包里是否还有另一种口径的 HTML。不能靠「文件是否存在」判断：
+     *                        两份 HTML 在同一轮导出里先后写出，先写的那份看不到后写的那份。
+     */
+    static void writeHtml(TierListModel model, File file, boolean hasOtherVariant) throws IOException {
         StringBuilder html = new StringBuilder(131072);
         html.append("<!DOCTYPE html>\n<html lang=\"zh-CN\">\n<head>\n");
         html.append("<meta charset=\"utf-8\">\n");
         html.append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n");
-        html.append("<title>TinyCat Tier List / ").append(htmlTitleSuffix(model.scope)).append("</title>\n");
+        String titleSuffix = htmlTitleSuffix(model.scope)
+                + (model.standardized ? " · 标准化率 Standardized" : "");
+        html.append("<title>TinyCat Tier List / ").append(titleSuffix).append("</title>\n");
         html.append("<style>\n");
         html.append(":root{--bg:#0f1116;--panel:#171a21;--panel2:#1d212a;--text:#e7e2d4;--muted:#9aa1ad;--line:#2b303b;--gold:#e5c07b;}\n");
         html.append("*{box-sizing:border-box}\n");
@@ -382,7 +428,6 @@ public final class TierListExporter {
         html.append("@media(max-width:760px){body{padding:16px}.tier-row{grid-template-columns:1fr}.tier-label{border-left:0;border-top:3px solid var(--line);padding:6px 0 0}h1{font-size:23px}}\n");
         html.append("</style>\n</head>\n<body>\n<div class=\"wrap\">\n");
         boolean rankScope = model.scope != null && model.scope.isRankBased();
-        String titleSuffix = htmlTitleSuffix(model.scope);
         html.append("<h1>TinyCat Tier List <small>").append(titleSuffix).append("</small></h1>\n");
         html.append("<p class=\"sub\">Slay the Spire · local run history export / 杀戮尖塔本地对局历史导出</p>\n");
         html.append("<div class=\"chips\">\n");
@@ -400,7 +445,51 @@ public final class TierListExporter {
         html.append(chip("Generated / 生成时间", model.generatedAt));
         html.append("</div>\n");
         html.append("<div class=\"note\">\n");
-        if (rankScope) {
+        if (model.standardized) {
+            html.append("<b>本页数值 = 标准化率，不是占比。</b>")
+                    .append("标准化率由 Plackett-Luce 模型估出：每次「几选一」是一个选择集，")
+                    .append("选中某个的概率 = 它的强度 ÷ 同屏所有选项强度之和；用全部对局一起拟合，再归一到合计 100%。")
+                    .append("它扣掉了「这个选项总和强卡一起出现」「这个选项只在前几层出现」之类的偏差，")
+                    .append("回答的是<b>谁更值得选</b>；卡片副标给的是原始计数占比与 95%CI"
+                            + "（一次选择整组重采样的 bootstrap），")
+                    .append("两者回答的是不同问题，<b>不能用这份替换游戏内页面上的占比</b>。<br>\n");
+            boolean splitStdTail = model.scope == null || model.scope.splitsStandardTail();
+            html.append("<b>分档：</b>");
+            if (splitStdTail) {
+                html.append("≥1% 的条目用 Jenks 自然断点（k=").append(RankRule.JENKS_K)
+                        .append("）；<1% 的长尾按对数尺度再切一档（R0 / R00），整表共 7 档")
+                        .append("（按标准化率重切，不沿用占比切出来的档）。<br>\n");
+                html.append("<b>Tier rule:</b> Jenks breaks (k=").append(RankRule.JENKS_K)
+                        .append(") on entries ≥1%; the <1% tail is split once more on a log scale ")
+                        .append("(R0 / R00), 7 tiers in total.<br>\n");
+            } else {
+                html.append(RankRule.ACTIVE.labelZh).append(" —— ")
+                        .append(RankRule.ACTIVE.noteZh).append("（按标准化率重切，不沿用占比切出来的档）。<br>\n");
+            }
+            html.append("<b>Method / 口径：</b> standardized rate = Plackett-Luce on whole choice sets "
+                    + "(one reward screen = one decision; skip included); ")
+                    .append("95% CI from a cluster bootstrap that resamples whole choice events (1000 draws). ")
+                    .append("This answers <b>which option is worth picking</b>, ")
+                    .append("not <b>which one players actually clicked</b>; the in-game screen always keeps the plain share.<br>\n");
+            if (model.scope == null || model.scope == TierListScope.ALL
+                    || model.scope.isCards()) {
+                html.append("<b>卡牌：</b>每次奖励是「3 张牌 + 跳过」的一个选择集，整屏一起进似然；")
+                        .append("持有颂钵时的跳过并入 SKIP 桶，所以跳过在每一次奖励里都是对手。")
+                        .append("一幕、二幕、三、四幕分别拟合，另给第二至四幕合并的「第一幕后」；")
+                        .append("每组单独拟合、各自合计 100%，<b>不能跨组相加</b>。")
+                        .append("一幕包含 floor 0 与一幕 Boss 后的奖励屏，分幕按每局实际 Boss 楼层判定。")
+                        .append("<b>0 次被选的卡</b>强度只剩「它输给了谁」这一点信息，")
+                        .append("彼此之间的名次不要当强度差异看。")
+                        .append("<b>未校正：</b>同一局里同一张卡第 2 次被提供时抓取率平均低 12pp（已有一张，边际价值下降），")
+                        .append("这对名次的影响约 0.5~1 位（最大 6 位），本表不做张数校正。<br>\n");
+                html.append("<b>Cards:</b> each reward is one choice set of \"3 cards + skip\" (not 3 pairwise duels); ")
+                        .append("skip (with Singing Bowl merged in) competes on every reward. ")
+                        .append("Acts 1, 2 and 3-4 are fitted separately, plus a merged after-Act-1 view; ")
+                        .append("each view sums to 100% on its own and must not be added across views. ")
+                        .append("Act 1 includes floor 0 and the Act 1 boss reward, with acts split by each run's real boss floors. ")
+                        .append("Zero-pick cards carry no pick signal beyond whom they lost to — do not read their order as strength.<br>\n");
+            }
+        } else if (rankScope) {
             html.append("<b>Method / 口径：</b>").append(RankRule.ACTIVE.labelZh).append(" —— ")
                     .append(RankRule.ACTIVE.noteZh).append("。");
             if (model.scope == TierListScope.CAMPFIRE_UPGRADE) {
@@ -438,36 +527,52 @@ public final class TierListExporter {
         }
         if (!rankScope) {
         html.append("<b>Method / 口径：</b> pick rate = <b>picked / offered</b> (被选取次数 / 被提供次数). ");
-        html.append("Act split follows the existing TinyCat aggregation: floors &lt; 17 = Act 1, floors &gt;= 17 = after Act 1. ");
+        html.append("Card acts follow each run's real boss floors (Run.getAct): floor 0 and the Act 1 boss reward belong to Act 1; Acts 1, 2, 3-4 and the merged after-Act-1 view are exported together. ");
         html.append("Only A20, non-daily, non-special runs from the current save slot are included (same filter as the in-game stats). ");
         html.append("Seed filter: <b>").append(escapeHtml(model.seedFilter.labelEn)).append("</b>. ");
         html.append("Chinese is the default language for data.csv and every .xlsx workbook. There are 4 base characters; ALL is an aggregate, not a fifth character. ");
         html.append("SKIP is kept as a real entry; Singing Bowl is merged into SKIP. CURSE/STATUS cards are excluded.<br>\n");
-        html.append("<b>口径：</b>抓率 = 被选取次数 ÷ 被提供次数；第一幕/第一幕后沿用现有聚合（floor &lt; 17 为第一幕，floor &gt;= 17 为第一幕后）。");
+        html.append("<b>口径：</b>抓率 = 被选取次数 ÷ 被提供次数；分幕按每局实际 Boss 楼层（Run.getAct）判定，");
+        html.append("第一幕包含 floor 0 与一幕 Boss 后的奖励屏；一幕、二幕、三、四幕与第二至四幕合并的「第一幕后」一起导出。");
         html.append("只统计当前存档位的 A20、非每日/特殊局（与游戏内统计一致），种子局筛选：<b>")
                 .append(escapeHtml(model.seedFilter.labelZh)).append("</b>。");
         html.append("data.csv 与所有 .xlsx 均默认中文；基础角色 4 个，ALL 是汇总而非第 5 个角色。");
-        html.append("SKIP 保留，颂钵并入 SKIP；CURSE/STATUS 卡剔除。<br>\n");
+        html.append("SKIP 保留，颂钵并入 SKIP；CURSE/STATUS 卡剔除。");
+        if (hasOtherVariant) {
+            html.append("同一份数据另有一份<b>标准化率</b>视图（回答「谁更值得选」，不是占比），见页脚链接。");
+        }
+        html.append("<br>\n");
         }
         html.append("<b>Images / 图片：</b> all images are extracted from the local game at runtime (CardLibrary / RelicLibrary); SKIP and missing images use a locally generated placeholder. No network or external image source. ");
         html.append("图片全部来自本地游戏内存（CardLibrary / RelicLibrary），SKIP 和缺失图使用本地生成的占位图；不访问网络、不依赖外部图源。\n");
         html.append("</div>\n");
         html.append("<div class=\"links\">");
-        if (new File(file.getParentFile(), "tierlist.jpg").isFile()) {
-            html.append("<a href=\"tierlist.jpg\">tierlist.jpg</a>");
+        File parentDir = file.getParentFile();
+        String stdBase = "tierlist" + RateVariant.FILE_SUFFIX;
+        // 两种口径互链：读者必须能一眼跳到另一份，否则很容易把一份当成全部
+        String otherHtml = model.standardized ? "tierlist.html" : stdBase + ".html";
+        if (hasOtherVariant) {
+            html.append("<a href=\"").append(otherHtml).append("\">")
+                    .append(model.standardized ? "简单率视图 tierlist.html" : "标准化率视图 " + otherHtml)
+                    .append("</a>");
         }
-        if (new File(file.getParentFile(), "tierlist.png").isFile()) {
-            html.append("<a href=\"tierlist.png\">tierlist.png</a>");
+        String selfBase = model.standardized ? stdBase : "tierlist";
+        if (new File(parentDir, selfBase + ".jpg").isFile()) {
+            html.append("<a href=\"").append(selfBase).append(".jpg\">").append(selfBase).append(".jpg</a>");
         }
-        File charts = new File(file.getParentFile(), ExportImagePack.DIR);
+        if (new File(parentDir, selfBase + ".png").isFile()) {
+            html.append("<a href=\"").append(selfBase).append(".png\">").append(selfBase).append(".png</a>");
+        }
+        File charts = new File(parentDir, ExportImagePack.DIR);
         if (charts.isDirectory()) {
-            String full = ExportImagePack.DIR + "/00-完整梯度图.jpg";
-            if (new File(file.getParentFile(), full).isFile()) {
+            String full = ExportImagePack.DIR + "/00-完整梯度图"
+                    + (model.standardized ? RateVariant.CHART_SUFFIX : "") + ".jpg";
+            if (new File(parentDir, full).isFile()) {
                 html.append("<a href=\"").append(escapeHtml(full)).append("\">完整梯度图（含怪物危险度）</a>");
             }
         }
         for (String statFile : STAT_FILES) {
-            if (new File(file.getParentFile(), statFile).isFile()) {
+            if (new File(parentDir, statFile).isFile()) {
                 html.append("<a href=\"").append(escapeHtml(statFile)).append("\">")
                         .append(escapeHtml(statFile)).append("</a>");
             }
@@ -484,7 +589,7 @@ public final class TierListExporter {
             if (group.entries.isEmpty()) {
                 html.append("<div class=\"empty\">No data / 无数据</div>\n");
             } else {
-                for (Tier tier : tiersFor(model.scope)) {
+                for (Tier tier : tiersFor(model.scope, model.standardized)) {
                     List<TierEntry> entries = group.entriesOf(tier);
                     html.append("<div class=\"tier-row\">\n");
                     html.append("<div class=\"tier-label\" style=\"border-left-color:").append(tier.color).append("\">\n");
@@ -518,7 +623,8 @@ public final class TierListExporter {
             html.append("<table><thead><tr><th>#</th><th>Name / 名称</th><th>Type</th><th>")
                     .append(model.scope == TierListScope.CAMPFIRE_UPGRADE
                             ? "Chosen / Candidates 被敲/候选" : "Picked / Offered 选取/提供")
-                    .append("</th><th>Rate</th><th>Tier</th></tr></thead><tbody>\n");
+                    .append("</th><th>").append(model.standardized ? "标准化率 / Standardized %" : "Rate")
+                    .append("</th><th>Tier</th></tr></thead><tbody>\n");
             int index = 1;
             for (TierEntry entry : group.entries) {
                 html.append("<tr><td>").append(index++).append("</td><td>").append(escapeHtml(entry.nameZh)).append(" / ").append(escapeHtml(entry.nameEn));
@@ -526,7 +632,13 @@ public final class TierListExporter {
                 if (entry.context != null && !entry.context.isEmpty()) {
                     html.append("<br><small>").append(escapeHtml(entry.context)).append("</small>");
                 }
-                html.append("</td><td>").append(formatRate(entry.rate)).append("%</td><td>").append(entry.tier == null ? "" : escapeHtml(entry.tier.key)).append("</td></tr>\n");
+                html.append("</td><td>").append(formatRate(entry.rate)).append("%");
+                // 标准化视图的 CI 不进图片副标（宽度不够），表格里补上
+                if (model.standardized && entry.stdHigh > 0.0D) {
+                    html.append(" <small>[").append(formatRate(entry.stdLow))
+                            .append("–").append(formatRate(entry.stdHigh)).append("]</small>");
+                }
+                html.append("</td><td>").append(entry.tier == null ? "" : escapeHtml(entry.tier.key)).append("</td></tr>\n");
             }
             html.append("</tbody></table></details>\n");
             html.append("</section>\n");
@@ -559,7 +671,7 @@ public final class TierListExporter {
         return "抓率梯度";
     }
 
-    private static void writeReadme(TierListModel model, File file) throws IOException {
+    private static void writeReadme(TierListModel model, File file, boolean hasStandard) throws IOException {
         StringBuilder text = new StringBuilder(8192);
         text.append("TinyCat Tier List Export\n");
         text.append("========================\n\n");
@@ -582,7 +694,9 @@ public final class TierListExporter {
         text.append("data.csv      - one row per entry, Chinese headers, UTF-8 with BOM (Excel friendly)\n");
         text.append("data.json     - structured data with tier/group metadata\n");
         text.append("*.xlsx        - Chinese Excel workbooks following the in-game stats pages:\n");
-        text.append("                总体统计 / 第一幕卡牌选取率 / 第一幕后卡牌选取率 / 卡组中的卡牌胜率 /\n");
+        text.append("                总体统计 / 第一幕卡牌选取率 / 第二幕卡牌选取率 /\n");
+        text.append("                第三、四幕卡牌选取率 / 第一幕后卡牌选取率（第二至四幕合并） /\n");
+        text.append("                卡组中的卡牌胜率 /\n");
         text.append("                尼奥奖励 / BOSS遗物 / 遭遇战伤害（战损、受到伤害、有无回复）/\n");
         text.append("                怪物危险度（怪物危险度梯度，按幕 T0-T4 分档）/ \n");
         text.append("                遭遇战死亡率与药水 / 遗物胜率 / 各幕事件胜率 / 火堆行动 / 商店行动 /\n");
@@ -592,8 +706,15 @@ public final class TierListExporter {
         text.append("tierlist.html - self-contained visual tier list (open in any browser)\n");
         text.append("tierlist.jpg  - shareable full tier-list image (JPEG)\n");
         text.append("tierlist.png  - shareable full tier-list image (lossless PNG)\n");
+        if (hasStandard) {
+            text.append("tierlist_standardized.html / .jpg / .png\n");
+            text.append("              - 同一份数据的「标准化率」视图（Plackett-Luce），与上面三个同名文件一一对应\n");
+        }
         text.append("图表/         - 一图完整（00-完整梯度图，含怪物危险度）+ 按指标页分图（01 起）\n");
         text.append("                每张都有 .png（无损）和 .jpg（体积小）两种\n");
+        if (hasStandard) {
+            text.append("                带「-标准化率」后缀的是同一张表的标准化率版本\n");
+        }
         text.append("images/       - card portraits, boss relic icons, SKIP placeholder\n");
         text.append("README.txt    - this file\n\n");
 
@@ -649,13 +770,56 @@ public final class TierListExporter {
             text.append("原理：权重 p 的标准误 = sqrt(p(1-p)/n)，倍数 = p ÷ 基线，p 抖 ±5pp，倍数就抖 ±0.35。\n");
             text.append("Sample size: every entry is listed regardless of n; read multipliers at n >= 30 and rank at n >= 100.\n\n");
         } else {
-            for (Tier tier : tiersFor(model.scope)) {
+            for (Tier tier : tiersFor(model.scope, model.standardized)) {
                 text.append(String.format(Locale.US, "%-5s %-16s %s\n", tier.key, tier.labelEn, tier.labelZh));
             }
             text.append("Pick rate = picked / offered (raw counts, not rounded before tiering).\n");
             text.append("0% tier is exactly picked == 0 with offered > 0.\n");
             text.append("F covers 0 < rate < 15% (including 0.1%-0.9%).\n");
             text.append("SKIP is kept; Singing Bowl is merged into SKIP; CURSE/STATUS cards are excluded.\n\n");
+        }
+
+        if (hasStandard) {
+            text.append("Rate definitions / 两种口径（本包同时提供）\n");
+            text.append("--------------------------------------\n");
+            text.append("简单率 / 选取率 = 次数 ÷ 分母（卡牌是被选 ÷ 被提供；尼奥是被选 ÷ 出现）。\n");
+            text.append("  它就是游戏内页面上的数字，也是能直接对着 .run 原始记录逐条核对的数字。\n\n");
+            text.append("标准化率 = Plackett-Luce 强度占比（合计 100%）。\n");
+            text.append("  每次「几选一」是一个选择集，选中某个的概率 = 它的强度 ÷ 同屏所有选项强度之和；\n");
+            text.append("  用全部对局一起拟合每个选项的相对强度，再归一到合计 100%。\n");
+            text.append("  为什么需要它：简单率会被「出场环境」污染——总和强卡一起出现的选项被系统性低估，\n");
+            text.append("  只在特定楼层出现的选项被系统性高估；三选一这种小样本尤其明显，标准化后才可比。\n");
+            text.append("  它和选取率不是一个量纲：全表合计 100%，条目越多单个数值越小，只看相对高低。\n");
+            text.append("  95%CI 来自整屏 bootstrap(1000)：一次「几选一」整组重采样，\n");
+            text.append("  不会把同一个决定当成多份独立证据（旧算法按格子重采样会窄约 1.5 倍）。\n\n");
+            text.append("两份回答的是不同问题，谁也不能替代谁：\n");
+            text.append("  简单率 = 玩家实际点了哪个；标准化率 = 扣掉环境因素后谁更值得选。\n");
+            text.append("  游戏内页面一律用简单率（前端不显示标准化率），导出包才两份都给。\n\n");
+            text.append("卡牌表的三个注意点：\n");
+            text.append("  1) SKIP 与颂钵（并入 SKIP）每次奖励都在场，必须进选择集；剔除它会让名次整体偏 1~2 位。\n");
+            text.append("  2) 一幕 / 二幕 / 三、四幕分别拟合，另给第二至四幕合并的「第一幕后」；\n");
+            text.append("     一幕包含 floor 0 与一幕 Boss 后的奖励屏；四组各自合计 100%，不能跨组相加\n");
+            text.append("     （第一幕后不是二幕 + 三、四幕相加）。\n");
+            text.append("  3) 0 次被选的卡只剩「它输给了谁」这一条信息，彼此名次不代表强度差异。\n");
+            text.append("     未校正：同一局第 2 次被提供时平均少抓 12pp，对名次影响约 0.5~1 位（最大 6 位）。\n\n");
+            text.append("Eng: standardized rate = Plackett-Luce fit on every whole \"pick one of N\" choice set;\n");
+            text.append("95% CI from a 1000-draw cluster bootstrap that resamples whole choice events.\n");
+            text.append("across the table, so it is a relative strength share, not a pick probability.\n");
+            text.append("The plain share answers \"what did players click\"; the standardized rate answers\n");
+            text.append("\"what is worth picking\". The in-game screen always shows the plain share.\n");
+            text.append("Cards: skip (with Singing Bowl) competes on every reward; Acts 1, 2, 3-4 and the\n");
+            text.append("merged after-Act-1 view are fitted separately; each view sums to 100% on its own\n");
+            text.append("and must not be added across views; zero-pick cards differ only by whom they lost to.\n\n");
+            text.append("Excel color coding / Excel 配色（仅 xlsx）\n");
+            text.append("--------------------------------------\n");
+            text.append("卡片与尼奥工作簿按 95%CI 可信度整行上色：\n");
+            text.append("  绿色 = 可信：CI 半宽 ≤ 点估计的 20%，且出现 ≥ 10 次、被选 ≥ 3 次；\n");
+            text.append("  橙色 = 一般：半宽 ≤ 40%；\n");
+            text.append("  红色 = 不可信：半宽 > 40%，或出现 < 10 次、被选 < 3 次。\n");
+            text.append("零被选的卡 CI 会退化为 0 宽（看起来最可信），所以先按被选次数兜底，统一标红。\n");
+            text.append("Eng: rows in the card and Neow workbooks are tinted by 95% CI reliability:\n");
+            text.append("green = half-width <= 20% of the estimate with >= 10 offers and >= 3 picks;\n");
+            text.append("orange = half-width <= 40%; red = wider, or fewer than 10 offers / 3 picks.\n\n");
         }
 
         text.append("Images / 图片\n");

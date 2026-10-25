@@ -22,6 +22,14 @@ public class TierListModel {
     public final int runCount;
     public final TierListScope scope;
     public final List<TierListGroup> groups;
+    /**
+     * 本份数据用的是不是「标准化率」口径。
+     *
+     * false = 界面同源的简单率（次数 / 分母），游戏内页面永远用这个；
+     * true  = Plackett-Luce 标准化率（剔除对手强度与出场次数差异），只在导出包里多出一份。
+     * 两份回答的是不同问题，必须同时给出，不能互相覆盖。
+     */
+    public final boolean standardized;
 
     public TierListModel(String generatedAt,
                          String characterId,
@@ -36,6 +44,24 @@ public class TierListModel {
                          int runCount,
                          TierListScope scope,
                          List<TierListGroup> groups) {
+        this(generatedAt, characterId, characterEn, characterZh, rotate, startDate, endDate,
+                includeAbandons, seedFilter, minSample, runCount, scope, groups, false);
+    }
+
+    public TierListModel(String generatedAt,
+                         String characterId,
+                         String characterEn,
+                         String characterZh,
+                         boolean rotate,
+                         String startDate,
+                         String endDate,
+                         boolean includeAbandons,
+                         SeedFilter seedFilter,
+                         int minSample,
+                         int runCount,
+                         TierListScope scope,
+                         List<TierListGroup> groups,
+                         boolean standardized) {
         this.generatedAt = generatedAt;
         this.characterId = characterId;
         this.characterEn = characterEn;
@@ -49,6 +75,7 @@ public class TierListModel {
         this.runCount = runCount;
         this.scope = scope;
         this.groups = groups;
+        this.standardized = standardized;
     }
 
     public int totalEntries() {
