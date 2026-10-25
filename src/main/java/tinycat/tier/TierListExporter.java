@@ -308,6 +308,12 @@ public final class TierListExporter {
                 item.put("picked", entry.picked);
                 item.put("pick_rate_pct", round2(entry.rate));
                 item.put("tier", entry.tier == null ? "" : entry.tier.key);
+                if (entry.standardized >= 0.0D) {
+                    // 只有尼奥表有标准化口径（Bradley-Terry）
+                    item.put("standardized_pct", round2(entry.standardized));
+                    item.put("standardized_ci_low_pct", round2(entry.stdLow));
+                    item.put("standardized_ci_high_pct", round2(entry.stdHigh));
+                }
                 if (entry.context != null && !entry.context.isEmpty()) {
                     item.put("context", entry.context);
                 }

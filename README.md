@@ -11,7 +11,7 @@
 | 项目 | 内容 |
 |------|------|
 | ModID | `TinyCat` |
-| 版本 | 4.2.2（工作区有未发布改动） |
+| 版本 | 4.5.3 |
 | 作者 | tinycat |
 | 依赖 | BaseMod, RunHistoryPlus |
 | 许可证 | MPL-2.0 |
@@ -116,7 +116,7 @@ tinycat/
 
 ## 第 0 层 HP 与金币追踪（可选测试版）
 
-主 TinyCat 4.2.2 **不写任何状态文件**，只在对局目录发现 `.tinycat` 时读取；没有就回退估算。这样普通安装不会在后台产生额外文件，也不会与其它 Mod 争抢写入。
+主 TinyCat **不写任何状态文件**，只在对局目录发现 `.tinycat` 时读取；没有就回退估算。这样普通安装不会在后台产生额外文件，也不会与其它 Mod 争抢写入。
 
 精确值由独立的测试 Mod `TinyCatTrackerTest` 生成，写入 `runs/{runDir}/{start_ts}.tinycat`（key=value）：
 
@@ -148,7 +148,7 @@ updated_ts=...
 gradle buildTrackerTestJAR
 ```
 
-产物 `build/libs/TinyCatTrackerTest_V0.1.0.jar`。把它和 `TinyCat_V4.2.2.jar` 一起放入 `mods/`，打几局后运行校验脚本，即可对照状态文件与分数明细。测试 Mod 只写状态，不参与统计界面渲染。
+产物 `build/libs/TinyCatTrackerTest_V0.1.0.jar`。把它和 `TinyCat_V4.5.3.jar` 一起放入 `mods/`，打几局后运行校验脚本，即可对照状态文件与分数明细。测试 Mod 只写状态，不参与统计界面渲染。
 
 ### 金币估算准确度
 
@@ -211,8 +211,8 @@ gradle buildJARWithImages
 ```
 
 产物：
-- 主 Mod（不含图）：`build/libs/TinyCat_V4.2.2.jar`
-- 主 Mod（**带图**，内部测试）：`build/libs/TinyCat_V4.2.2_images.jar`（约 6.8 MB）
+- 主 Mod（不含图）：`build/libs/TinyCat_V4.5.3.jar`
+- 主 Mod（**带图**，内部测试）：`build/libs/TinyCat_V4.5.3_images.jar`（约 6.8 MB）
 - 测试 Mod：`build/libs/TinyCatTrackerTest_V0.2.0.jar`
 
 带图版说明：
@@ -317,6 +317,34 @@ python scripts/verify_export.py "<tierlist-export/TinyCat_TierList_XXX_时间>" 
   不是逐条不同的提供次数——`.run` 里被跳过选项的代价全是 `NONE`，算不出带代价选项的真实选取率。
   同一张表内「次数」与「占比」是等比缩放，排序与档位完全一致（32 张表 100% 同序）。
 - 其余规则（`QUARTILE` / `CUMULATIVE` / `RELATIVE` / `HYBRID` / `VALUE_QUARTILE`）全部保留，可一行切换。
+
+### v4.5.3
+
+**火堆偏好改成「统一榜」**
+- 「升级」不再是一个总选项，拆回每张可敲的牌，与抽烟 / 举重 / 挖掘 / 回忆放在同一张榜上按占比排序
+- 分母 = 该次火堆的「池子」= 可敲卡种 + 可用遗物行动 + 可用回忆；随机基线 = 100 ÷ 平均池子
+- 咖啡杯禁用睡觉、锤子禁用升级：被禁用的选项不再计入分母（原来 `REST` 恒可选，把分母撑大了）
+- 睡觉单列（约束是血量，不进池子），以组备注挂在导出表标题下
+- 星盘 / 空鸟笼删牌无逐张日志，用终局卡组做双向补差
+
+**尼奥选项新增标准化率**
+- 按 `(奖励, 代价)` 逐项统计，不同代价算不同选项，不合并
+- 分母改为「该选项出现次数」（选中 + 被跳过），不再是总局数
+- 新增 Bradley-Terry 标准化率：把每局「1 选中 + 3 跳过」拆成 3 场两两对决估计强度，剔除对手强弱对简单率的扭曲
+- 简单率给 Wilson 95%CI，标准化率给配对矩阵 bootstrap(100) 95%CI；两条区间重叠时名次差不算真实差异
+- `尼奥奖励.xlsx` 拆成「简单率 / 标准化率」两张表；CSV 备注列、JSON（`standardized_pct` 等）也带上了
+
+**商店**
+- 药水不再被 `RelicLibrary` 的 Circlet 兜底误判成遗物（之前所有药水都显示成「头环」）
+- 药水名两种写法（`PowerPotion` / `Swift Potion`）归一化为 ID
+- 样本量门槛按「买过几次」，不再用统一分母（选 4 时买过 1 次的条目会真的消失）
+- 新增药水图片导出 `images/potions/`
+
+**其它**
+- `MOD_VERSION` 改为运行时读 `ModTheSpire.json`，导出页不再永远显示 4.2.2
+- 从 `desktop-1.0.jar` 的 `localization/zhs` 补了 12 个卡名官方汉化
+- 分档新增 <1% 独立档 `R0`，并修复该档在梯度图/HTML 中被跳过的问题
+- 火堆行动 / 商店行动页改回显示次数（不是占比）
 
 ### v4.2.2
 - 新增 `scripts/download_monster_images.py`：从灰机 wiki 敌人图鉴下载 46 张原图并生成 64 个遭遇别名；默认裁掉标题、稀有度徽章并做圆角（`--no-crop` 可保留整图）。图源仅限本地非商业使用（CC BY-NC-SA 4.0），不随仓库或 JAR 分发。

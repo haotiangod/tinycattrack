@@ -675,10 +675,28 @@ public final class TierListBuilder {
                     true);
             items.add(item);
         }
-        return rankGroup("neow_options",
+        TierListGroup group = rankGroup("neow_options",
                 "Neow options (bonus + cost)",
                 "尼奥开局选项（奖励 + 代价）",
                 items, minSample);
+        // 把 Bradley-Terry 标准化率与 95%CI 挂到条目上，CSV/JSON/图片/HTML 都能读到
+        Map<String, NeowRanker.Row> ranked = new LinkedHashMap<String, NeowRanker.Row>();
+        for (NeowRanker.Row row : NeowRanker.rank(cs, minSample)) {
+            ranked.put(row.neow.bonus + "_" + row.neow.cost, row);
+        }
+        for (TierEntry entry : group.entries) {
+            NeowRanker.Row row = ranked.get(entry.id);
+            if (row != null) {
+                entry.standardized = row.standardized;
+                entry.stdLow = row.standardizedLow;
+                entry.stdHigh = row.standardizedHigh;
+                // CSV 没有独立列，把标准化率写进备注，保证任何导出都能看到
+                entry.context = String.format(java.util.Locale.US,
+                        "标准化 %.2f%% (95%%CI %.2f–%.2f)",
+                        row.standardized, row.standardizedLow, row.standardizedHigh);
+            }
+        }
+        return group;
     }
 
     /**

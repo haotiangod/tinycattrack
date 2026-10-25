@@ -25,6 +25,10 @@ public class TierEntry {
     public String imageText;
     /** 补充口径，例如火堆升级目标的「抓取 X/Y」；为空则不显示。 */
     public String context = "";
+    /** 标准化率（%, Bradley-Terry）；< 0 表示该表没有标准化口径。 */
+    public double standardized = -1.0D;
+    public double stdLow = 0.0D;
+    public double stdHigh = 0.0D;
 
     public TierEntry(String id,
                      String nameEn,
