@@ -94,8 +94,9 @@ public final class AllStatsExporter {
                 writeBossRelics(model, cs, root);
                 break;
             case NEOW:
-                // 尼奥页的梯度表已按 (bonus,cost) 逐项导出到 data.csv / data.json；
-                // 不在这里再写一份按奖励合并的选取率工作簿，避免两种口径混在同一个包里。
+                // 尼奥页单独导出时也要有工作簿：里面有「简单率 / 标准化率」两张表，
+                // 标准化率只在这个 xlsx 里，不写就没地方看。
+                writeNeow(model, cs, root);
                 break;
             case CAMPFIRE:
                 writeCampfire(model, cs, root);

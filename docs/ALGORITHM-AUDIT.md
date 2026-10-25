@@ -99,6 +99,7 @@ am.get(es.enemies).add(es.actualHPLoss); // 战损
 
 | 日期 | 文件 | 改动 | 影响统计口径？ |
 |---|---|---|---|
+| 2026-10-25 18:30 | `tier/AllStatsExporter.java` | 用 javap 字节码对比 4.5.2 的 jar，发现重写的 `writeCampfireUpgrade` 漏了 `writeCampfireMix(...)`（火堆构成表），已补回。其余 7 个从 git 恢复的方法逐条对比引用完全一致 | 否 |
 | 2026-10-25 18:22 | `stats/ClassStat.java`、`tier/NeowRanker.java`(新)、`tier/AllStatsExporter.java` | ① 新增尼奥两两对决矩阵 `neowBeats`（每局 1 选 + 3 跳 = 3 场对决）；② 新增 `NeowRanker`：Bradley-Terry 标准化率 + Wilson 区间（简单率）+ bootstrap 100 次的区间（标准化率）；③ 尼奥工作簿拆成「简单率」「标准化率」两张表，各带 95%CI 与名次变动 | 是（新增标准化口径，简单率保持不变） |
 | 2026-10-25 17:26 | `patches/StatsScreenPatch.java`、`tier/TierListBuilder.java` | **更正 17:06/17:09 的错误结论**：`neow_costs_skipped_log` 并非全为 NONE（全量 1026 局里有 562 条带代价，37 个组合只有 5 个是 100%），代价信息基本完整。游戏内尼奥页分母由「总局数」改为「该选项被选中+被跳过」，并按选取率排序；删除上一轮加的「被跳过的代价未记录」错误备注 | 是（尼奥分母） |
 | 2026-10-25 17:26 | `tier/TierListBuilder.java` | **撤销 17:06 的「尼奥按 bonus 聚合」**：不同代价是不同选项，不允许因效果相同而合并，恢复 `(bonus, cost)` 逐项统计。带代价的条目在 `context` 标注「被跳过的代价未记录，分母仅含被选中次数」。同时修复一次误删：替换该方法时连带删掉了 `safe/whatOf/countOf/totalOf/pickRatesByName/isShopMeta/shopNameZh/RankItem`，已全部补回 | 是（撤回上一轮口径变更） |
