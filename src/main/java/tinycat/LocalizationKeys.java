@@ -33,9 +33,14 @@ public class LocalizationKeys {
     public static final String UI_EVENT_WIN_RATE_PER_ACT = "ui.event_win_rate_per_act";
     public static final String UI_CAMPFIRE_ACTIONS = "ui.campfire_actions";
     public static final String UI_SHOP_ACTIONS = "ui.shop_actions";
+    public static final String UI_CAMPFIRE_UPGRADE_PREF = "ui.campfire_upgrade_pref";
     public static final String UI_CAMPFIRE_UPGRADE_RATE = "ui.campfire_upgrade_rate";
     public static final String UI_META_SCALING = "ui.meta_scaling";
     public static final String UI_EXPORT_TIER_LIST = "ui.export_tier_list";
+    public static final String UI_EXPORT_CAMPFIRE_TIER = "ui.export_campfire_tier";
+    public static final String UI_EXPORT_SHOP_TIER = "ui.export_shop_tier";
+    public static final String UI_EXPORT_CAMPFIRE_UPGRADE_TIER = "ui.export_campfire_upgrade_tier";
+    public static final String UI_EXPORT_NEOW_TIER = "ui.export_neow_tier";
     public static final String UI_EXPORT_ALL_TIER_LIST = "ui.export_all_tier_list";
     public static final String UI_EXPORTING_TIER_LIST = "ui.exporting_tier_list";
     public static final String UI_EXPORT_MONSTER_TIER = "ui.export_monster_tier";

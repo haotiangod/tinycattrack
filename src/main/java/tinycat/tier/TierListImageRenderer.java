@@ -23,7 +23,7 @@ import java.util.List;
  * 只依赖 JDK 自带的 Java2D / ImageIO，不引入新依赖，也不访问网络。
  */
 public final class TierListImageRenderer {
-    private static final int WIDTH = 1600;
+    static final int WIDTH = 1600;
     private static final int PAD = 40;
     private static final int LABEL_W = 170;
     private static final int COLS = 5;
@@ -43,44 +43,63 @@ public final class TierListImageRenderer {
     }
 
     public static void write(TierListModel model, File root) throws Exception {
-        BufferedImage image = render(model, root);
+        BufferedImage image = render(model, root, model.groups);
         ImageIO.write(image, "png", new File(root, "tierlist.png"));
         writeJpeg(image, new File(root, "tierlist.jpg"), 0.92F);
     }
 
-    private static BufferedImage render(TierListModel model, File root) {
-        int height = layoutHeight(model);
+    /** 渲染指定分组；供「一图完整」与「按指标分图」复用。 */
+    static BufferedImage render(TierListModel model, File root, List<TierListGroup> groups) {
+        int height = layoutHeight(groups, model.scope);
         BufferedImage image = new BufferedImage(WIDTH, height, BufferedImage.TYPE_INT_RGB);
         Graphics2D g = image.createGraphics();
         try {
-            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-            g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-            g.setColor(BG);
-            g.fillRect(0, 0, WIDTH, height);
-
-            int y = PAD;
-            y = drawHeader(g, model, y);
-            for (TierListGroup group : model.groups) {
-                y = drawGroup(g, model, group, root, y);
-            }
-            g.setColor(MUTED);
-            g.setFont(font(12, Font.PLAIN));
-            g.drawString("TinyCat 4.2.2 · local export · no external image source", PAD, height - 24);
+            drawSection(g, model, root, groups, height);
         } finally {
             g.dispose();
         }
         return image;
     }
 
-    private static int layoutHeight(TierListModel model) {
+    /** 单段高度（不含其它段落），供整图拼接预算画布。 */
+    static int sectionHeight(List<TierListGroup> groups) {
+        return layoutHeight(groups, null);
+    }
+
+    /**
+     * 把一段内容画进现成的画布：调用方负责坐标（可先 translate），
+     * 背景由本方法自己铺，所以多段拼接时不会互相覆盖。
+     */
+    static void drawSection(Graphics2D g,
+                            TierListModel model,
+                            File root,
+                            List<TierListGroup> groups,
+                            int height) {
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+        g.setColor(BG);
+        g.fillRect(0, 0, WIDTH, height);
+
+        int y = PAD;
+        y = drawHeader(g, model, y);
+        for (TierListGroup group : groups) {
+            y = drawGroup(g, model, group, root, y);
+        }
+        g.setColor(MUTED);
+        g.setFont(font(12, Font.PLAIN));
+        g.drawString("TinyCat 4.2.2 · local export · no external image source", PAD, height - 24);
+    }
+
+    private static int layoutHeight(List<TierListGroup> groups, TierListScope scope) {
+        List<Tier> tiers = TierListExporter.tiersFor(scope);
         int height = PAD + 150;
-        for (TierListGroup group : model.groups) {
+        for (TierListGroup group : groups) {
             height += 54;
             if (group.entries.isEmpty()) {
                 height += 40;
                 continue;
             }
-            for (Tier tier : Tier.values()) {
+            for (Tier tier : tiers) {
                 int count = group.countOf(tier);
                 int rows = Math.max(1, (count + COLS - 1) / COLS);
                 height += count == 0 ? 34 : 28 + rows * (ENTRY_H + GAP) + 8;
@@ -96,7 +115,7 @@ public final class TierListImageRenderer {
         g.drawString("TinyCat Tier List", PAD, y + 34);
         g.setColor(MUTED);
         g.setFont(font(16, Font.PLAIN));
-        g.drawString("抓率梯度 · local run history export", PAD, y + 60);
+        g.drawString(metricSubtitle(model.scope), PAD, y + 60);
 
         y += 82;
         g.setFont(font(13, Font.PLAIN));
@@ -117,9 +136,44 @@ public final class TierListImageRenderer {
         y += 22;
         g.setColor(MUTED);
         g.setFont(font(12, Font.PLAIN));
-        g.drawString("抓率 = 被选取次数 / 被提供次数；0 档 = 从未被选取；SKIP 保留，颂钵并入 SKIP。"
-                + "图片全部来自本地游戏，不依赖外部图源。", PAD, y);
+        g.drawString(metricNote(model.scope) + "图片全部来自本地游戏，不依赖外部图源。", PAD, y);
         return y + 22;
+    }
+
+    private static String metricSubtitle(TierListScope scope) {
+        if (scope == TierListScope.CAMPFIRE) {
+            return "火堆行动梯度 · local run history export";
+        }
+        if (scope == TierListScope.CAMPFIRE_UPGRADE) {
+            return "火堆偏好 · 被敲次数 / 候选次数";
+        }
+        if (scope == TierListScope.SHOP) {
+            return "商店购买梯度 · local run history export";
+        }
+        if (scope == TierListScope.NEOW) {
+            return "尼奥选项梯度 · local run history export";
+        }
+        if (scope == null) {
+            return "全量梯度 · local run history export";
+        }
+        return "抓率梯度 · local run history export";
+    }
+
+    private static String metricNote(TierListScope scope) {
+        if (scope == TierListScope.CAMPFIRE) {
+            return "占比 = 该行动次数 / 该幕火堆行动总数；每幕都含升级、睡觉、回忆、删牌、挖掘、举重。";
+        }
+        if (scope == TierListScope.CAMPFIRE_UPGRADE) {
+            return "火堆偏好：主标 = 被敲次数 / 候选次数（每次锻造时，卡组里还能敲的卡牌种类数，同名只算一个选项）；"
+                    + "分档按权重%，副标 12/16 = 被敲/候选，并附占锻造、占火堆；只统计火堆锻造。";
+        }
+        if (scope == TierListScope.SHOP) {
+            return "占比 = 购买次数 / 该幕购买总次数（商店总数、有效商店数不计入分母）；删牌单独成组。";
+        }
+        if (scope == TierListScope.NEOW) {
+            return "占比 = 该选项被选中次数 / 尼奥选择总次数；一行 = 一个「奖励+代价」选项，不做合并。";
+        }
+        return "抓率 = 被选取次数 / 被提供次数；0 档 = 从未被选取；SKIP 保留，颂钵并入 SKIP。";
     }
 
     private static int drawGroup(Graphics2D g, TierListModel model, TierListGroup group, File root, int y) {
@@ -132,6 +186,14 @@ public final class TierListImageRenderer {
         g.drawString(group.labelEn, PAD + zhWidth + 14, y + 28);
         y += 46;
 
+        if (group.note != null && !group.note.isEmpty()) {
+            // 睡觉不参与竞争榜，但数值重要，单独挂在组标题下
+            g.setColor(MUTED);
+            g.setFont(font(12, Font.PLAIN));
+            g.drawString(group.note, PAD + LABEL_W, y + 6);
+            y += 24;
+        }
+
         if (group.entries.isEmpty()) {
             g.setColor(MUTED);
             g.setFont(font(14, Font.PLAIN));
@@ -139,7 +201,8 @@ public final class TierListImageRenderer {
             return y + 40;
         }
 
-        for (Tier tier : Tier.values()) {
+        boolean countPrimary = countPrimary(model.scope);
+        for (Tier tier : TierListExporter.tiersFor(model.scope)) {
             List<TierEntry> entries = group.entriesOf(tier);
             int count = entries.size();
             Color tierColor = Color.decode(tier.color);
@@ -164,7 +227,7 @@ public final class TierListImageRenderer {
                 int row = i / COLS;
                 int x = PAD + LABEL_W + col * (ENTRY_W + GAP);
                 int ey = y + row * (ENTRY_H + GAP);
-                drawEntry(g, entries.get(i), root, x, ey, tierColor);
+                drawEntry(g, entries.get(i), root, x, ey, tierColor, countPrimary, model.scope);
             }
             int rows = (count + COLS - 1) / COLS;
             y += rows * (ENTRY_H + GAP) + 8;
@@ -172,7 +235,20 @@ public final class TierListImageRenderer {
         return y + 8;
     }
 
-    private static void drawEntry(Graphics2D g, TierEntry entry, File root, int x, int y, Color tierColor) {
+    /** 火堆 / 商店主标写次数（分档就是按次数切的），尼奥与抓率表主标写百分比。 */
+    /**
+     * 卡片主标是否显示「次数」。
+     *
+     * 火堆、商店是重尾计数（一件事做几十上百次），次数比百分比直观；
+     * 尼奥每局只选一次、各选项分母也不一样，次数会误导（21 次 vs 11.09% 谁更值得选？），
+     * 所以尼奥改成主标显示百分比，次数退到副标。
+     */
+    private static boolean countPrimary(TierListScope scope) {
+        return scope == TierListScope.CAMPFIRE || scope == TierListScope.SHOP;
+    }
+
+    private static void drawEntry(Graphics2D g, TierEntry entry, File root, int x, int y, Color tierColor,
+                                  boolean countPrimary, TierListScope scope) {
         g.setColor(PANEL2);
         g.fillRoundRect(x, y, ENTRY_W, ENTRY_H, 10, 10);
         g.setColor(LINE);
@@ -205,10 +281,31 @@ public final class TierListImageRenderer {
 
         g.setColor(tierColor);
         g.setFont(font(15, Font.BOLD));
-        g.drawString(String.format(java.util.Locale.US, "%.2f%%", entry.rate), textX, y + 66);
-        g.setColor(MUTED);
-        g.setFont(font(9, Font.PLAIN));
-        g.drawString(entry.picked + " / " + entry.offered, textX, y + 80);
+        if (countPrimary) {
+            // 主标 = 原始行动次数（与分档同源）；副标 = 占该幕总数 % + 分子/分母
+            g.drawString(entry.picked + " 次", textX, y + 66);
+            g.setColor(MUTED);
+            g.setFont(font(9, Font.PLAIN));
+            String secondary = String.format(java.util.Locale.US, "%.2f%% · %d/%d",
+                    entry.rate, entry.picked, entry.offered);
+            if (entry.context != null && !entry.context.isEmpty()) {
+                secondary += " · " + entry.context;
+            }
+            g.drawString(fit(g, secondary, textW, Font.PLAIN, 9), textX, y + 80);
+        } else {
+            g.drawString(String.format(java.util.Locale.US, "%.2f%%", entry.rate), textX, y + 66);
+            g.setColor(MUTED);
+            g.setFont(font(9, Font.PLAIN));
+            String secondary = scope == TierListScope.CAMPFIRE_UPGRADE
+                    ? entry.picked + "/" + entry.offered
+                    + (entry.context == null || entry.context.isEmpty() ? "" : " · " + entry.context)
+                    : entry.picked + " / " + entry.offered;
+            if (scope != TierListScope.CAMPFIRE_UPGRADE
+                    && entry.context != null && !entry.context.isEmpty()) {
+                secondary += " · " + entry.context;
+            }
+            g.drawString(fit(g, secondary, textW, Font.PLAIN, 9), textX, y + 80);
+        }
     }
 
     private static BufferedImage loadImage(File root, String relativePath) {
@@ -226,7 +323,7 @@ public final class TierListImageRenderer {
         }
     }
 
-    private static void writeJpeg(BufferedImage image, File file, float quality) throws Exception {
+    static void writeJpeg(BufferedImage image, File file, float quality) throws Exception {
         Iterator<ImageWriter> writers = ImageIO.getImageWritersByFormatName("jpg");
         if (!writers.hasNext()) {
             return;

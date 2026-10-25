@@ -31,6 +31,7 @@ import java.util.zip.ZipOutputStream;
  *     ├── data.json
  *     ├── tierlist.html
  *     ├── README.txt
+ *     ├── 图表/                        # 00-完整梯度图 + 按指标页分图（png/jpg）
  *     ├── 总体统计.xlsx
  *     ├── 第一幕卡牌选取率.xlsx
  *     ├── 第一幕后卡牌选取率.xlsx
@@ -46,7 +47,25 @@ import java.util.zip.ZipOutputStream;
  */
 public final class TierListExporter {
     private static final String EXPORT_ROOT = "tierlist-export";
-    private static final String MOD_VERSION = "4.2.2";
+    /** 从 jar 里的 ModTheSpire.json 读版本，避免导出页面永远显示旧版本号。 */
+    private static final String MOD_VERSION = readModVersion();
+
+    private static String readModVersion() {
+        try (java.io.InputStream in = TierListExporter.class.getResourceAsStream("/ModTheSpire.json")) {
+            if (in != null) {
+                java.util.Scanner scanner = new java.util.Scanner(in, "UTF-8").useDelimiter("\\A");
+                String text = scanner.hasNext() ? scanner.next() : "";
+                java.util.regex.Matcher matcher = java.util.regex.Pattern
+                        .compile("\"version\"\\s*:\\s*\"([^\"]+)\"").matcher(text);
+                if (matcher.find()) {
+                    return matcher.group(1);
+                }
+            }
+        } catch (Throwable ignored) {
+            // 读不到就退回下面的常量
+        }
+        return "4.5.1";
+    }
     private static final String[] STAT_FILES = {
             "总体统计.xlsx",
             "第一幕卡牌选取率.xlsx",
@@ -55,6 +74,7 @@ public final class TierListExporter {
             "尼奥奖励.xlsx",
             "BOSS遗物.xlsx",
             "遭遇战伤害.xlsx",
+            "怪物危险度.xlsx",
             "遭遇战死亡率与药水.xlsx",
             "遗物胜率.xlsx",
             "各幕事件胜率.xlsx",
@@ -63,6 +83,23 @@ public final class TierListExporter {
     };
 
     private TierListExporter() {
+    }
+
+    /**
+     * 该范围用哪些档位渲染。
+     *
+     * 抓率型（卡牌 / BOSS 遗物）用 S..F + 0；排名型（火堆 / 商店 / 尼奥）用 RS..RD。
+     * 两套档位不能混在一张表里，否则每张表会多出 8 行空档。
+     */
+    public static List<Tier> tiersFor(TierListScope scope) {
+        List<Tier> out = new ArrayList<Tier>();
+        boolean rank = scope != null && scope.isRankBased();
+        for (Tier tier : Tier.values()) {
+            if (tier.isRankBased() == rank) {
+                out.add(tier);
+            }
+        }
+        return out;
     }
 
     public static String export(MoreStatsScreen screen) throws Exception {
@@ -105,10 +142,26 @@ public final class TierListExporter {
             writeCsv(model, new File(root, "data.csv"));
             writeJson(model, new File(root, "data.json"));
             AllStatsExporter.write(screen, model, root, model.scope);
+            MonsterTierModel monsterTier = null;
+            if (model.scope == null || model.scope == TierListScope.ALL) {
+                // 「全部导出」把怪物危险度梯度表一并写进同一个包；
+                // 单独导出卡牌/Boss 遗物时不带战损梯度表。
+                try {
+                    monsterTier = MonsterTierExporter.writeInto(screen, root);
+                } catch (Exception t) {
+                    tinycat.logger.warn("TierList: monster danger tiers not bundled", t);
+                }
+            }
             try {
                 TierListImageRenderer.write(model, root);
             } catch (Exception t) {
                 tinycat.logger.warn("TierList: failed to render shareable image", t);
+            }
+            try {
+                // 图表/：一张完整图 + 按前端指标页的分图（含怪物危险度）
+                ExportImagePack.write(model, monsterTier, root);
+            } catch (Exception t) {
+                tinycat.logger.warn("TierList: failed to render chart pack", t);
             }
             writeHtml(model, new File(root, "tierlist.html"));
             writeReadme(model, new File(root, "README.txt"));
@@ -139,7 +192,16 @@ public final class TierListExporter {
         Writer writer = new OutputStreamWriter(new FileOutputStream(file), StandardCharsets.UTF_8);
         try {
             writer.write('\uFEFF');
-            writer.write("角色ID,角色类型,种子局筛选,分组,类型,条目ID,英文名,中文名,提供次数,选取次数,选取率(%),梯度,图片\n");
+            boolean rank = model.scope != null && model.scope.isRankBased();
+            if (rank && model.scope == TierListScope.NEOW) {
+                writer.write("角色ID,角色类型,种子局筛选,分组,类型,条目ID,英文名,中文名,分母(尼奥选择总次数),次数,占比(%),梯度,备注,图片\n");
+            } else if (rank && model.scope == TierListScope.CAMPFIRE_UPGRADE) {
+                writer.write("角色ID,角色类型,种子局筛选,分组,类型,条目ID,英文名,中文名,候选次数,被敲次数,火堆权重(%),梯度,备注(占锻造/占火堆),图片\n");
+            } else {
+                writer.write(rank
+                        ? "角色ID,角色类型,种子局筛选,分组,类型,条目ID,英文名,中文名,分母(总次数),次数,占比(%),梯度,备注,图片\n"
+                        : "角色ID,角色类型,种子局筛选,分组,类型,条目ID,英文名,中文名,提供次数,选取次数,选取率(%),梯度,图片\n");
+            }
             for (TierListGroup group : model.groups) {
                 for (TierEntry entry : group.entries) {
                     writer.write(csv(model.characterId));
@@ -166,6 +228,10 @@ public final class TierListExporter {
                     writer.write(',');
                     writer.write(csv(entry.tier == null ? "" : entry.tier.key));
                     writer.write(',');
+                    if (rank) {
+                        writer.write(csv(entry.context));
+                        writer.write(',');
+                    }
                     writer.write(csv(imagePath(entry)));
                     writer.write('\n');
                 }
@@ -213,7 +279,7 @@ public final class TierListExporter {
         root.put("run_count", model.runCount);
 
         List<Map<String, Object>> tiers = new ArrayList<Map<String, Object>>();
-        for (Tier tier : Tier.values()) {
+        for (Tier tier : tiersFor(model.scope)) {
             Map<String, Object> item = new LinkedHashMap<String, Object>();
             item.put("key", tier.key);
             item.put("label_en", tier.labelEn);
@@ -242,6 +308,9 @@ public final class TierListExporter {
                 item.put("picked", entry.picked);
                 item.put("pick_rate_pct", round2(entry.rate));
                 item.put("tier", entry.tier == null ? "" : entry.tier.key);
+                if (entry.context != null && !entry.context.isEmpty()) {
+                    item.put("context", entry.context);
+                }
                 item.put("image", imagePath(entry));
                 entries.add(item);
             }
@@ -263,7 +332,7 @@ public final class TierListExporter {
         html.append("<!DOCTYPE html>\n<html lang=\"zh-CN\">\n<head>\n");
         html.append("<meta charset=\"utf-8\">\n");
         html.append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n");
-        html.append("<title>TinyCat Tier List / 抓率梯度</title>\n");
+        html.append("<title>TinyCat Tier List / ").append(htmlTitleSuffix(model.scope)).append("</title>\n");
         html.append("<style>\n");
         html.append(":root{--bg:#0f1116;--panel:#171a21;--panel2:#1d212a;--text:#e7e2d4;--muted:#9aa1ad;--line:#2b303b;--gold:#e5c07b;}\n");
         html.append("*{box-sizing:border-box}\n");
@@ -288,15 +357,15 @@ public final class TierListExporter {
         html.append(".tier-label .k{font-size:22px;font-weight:800;letter-spacing:.5px}\n");
         html.append(".tier-label .r{font-size:12px;color:var(--muted)}\n");
         html.append(".tier-label .c{font-size:11px;color:var(--muted)}\n");
-        html.append(".entries{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px}\n");
-        html.append(".entry{display:flex;align-items:center;gap:8px;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:6px;min-width:0}\n");
+        html.append(".entries{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;overflow:hidden}\n");
+        html.append(".entry{display:flex;align-items:center;gap:8px;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:6px;min-width:0;overflow:hidden}\n");
         html.append(".entry img{width:58px;height:44px;object-fit:cover;border-radius:6px;background:#0b0d11;flex:0 0 auto}\n");
         html.append(".entry .main{min-width:0;flex:1 1 auto}\n");
         html.append(".entry .zh{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}\n");
         html.append(".entry .en{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}\n");
-        html.append(".entry .stat{text-align:right;flex:0 0 auto}\n");
+        html.append(".entry .stat{text-align:right;flex:0 0 auto;max-width:46%;min-width:0}\n");
         html.append(".entry .pct{display:block;font-size:14px;font-weight:700;color:var(--gold)}\n");
-        html.append(".entry .cnt{display:block;font-size:10px;color:var(--muted)}\n");
+        html.append(".entry .cnt{display:block;font-size:10px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}\n");
         html.append(".empty{color:var(--muted);font-size:13px;padding:6px 0}\n");
         html.append("details.table-wrap{margin:4px 0 0;color:var(--muted);font-size:12px}\n");
         html.append("details.table-wrap summary{cursor:pointer;color:var(--gold);margin:4px 0}\n");
@@ -306,7 +375,9 @@ public final class TierListExporter {
         html.append("footer{color:var(--muted);font-size:12px;margin-top:26px;border-top:1px solid var(--line);padding-top:12px}\n");
         html.append("@media(max-width:760px){body{padding:16px}.tier-row{grid-template-columns:1fr}.tier-label{border-left:0;border-top:3px solid var(--line);padding:6px 0 0}h1{font-size:23px}}\n");
         html.append("</style>\n</head>\n<body>\n<div class=\"wrap\">\n");
-        html.append("<h1>TinyCat Tier List <small>抓率梯度</small></h1>\n");
+        boolean rankScope = model.scope != null && model.scope.isRankBased();
+        String titleSuffix = htmlTitleSuffix(model.scope);
+        html.append("<h1>TinyCat Tier List <small>").append(titleSuffix).append("</small></h1>\n");
         html.append("<p class=\"sub\">Slay the Spire · local run history export / 杀戮尖塔本地对局历史导出</p>\n");
         html.append("<div class=\"chips\">\n");
         html.append(chip("Character / 角色", model.characterZh + " / " + model.characterEn));
@@ -323,6 +394,43 @@ public final class TierListExporter {
         html.append(chip("Generated / 生成时间", model.generatedAt));
         html.append("</div>\n");
         html.append("<div class=\"note\">\n");
+        if (rankScope) {
+            html.append("<b>Method / 口径：</b>").append(RankRule.ACTIVE.labelZh).append(" —— ")
+                    .append(RankRule.ACTIVE.noteZh).append("。");
+            if (model.scope == TierListScope.CAMPFIRE_UPGRADE) {
+                html.append("<b>指标 = 火堆权重</b>（每次锻造时，分母是当时卡组里还有未升级副本的卡牌<b>种类数</b>，")
+                        .append("同名多张只算 1 个选项；分子是实际被敲的那一张），分档依据也是该权重；")
+                        .append("每张牌另附<b>占锻造</b>（被敲次数 ÷ 该幕锻造次数）与<b>占火堆</b>（被敲次数 ÷ 该幕火堆访问次数）。")
+                        .append("<b>A 列为替补口径</b>：被敲次数 ÷ 到该幕结束累计拥过的副本数，只依赖获得记录、不受删牌影响，")
+                        .append("卡组重建失败的条目（标 *）以它为准。")
+                        .append("只统计火堆锻造，已升级的副本不会再次被敲，所以第二幕起同一张卡的权重会自然下降。")
+                        .append("候选不足 10 次的条目不参与本表。<br>\n");
+                html.append("<b>Tier rule:</b> ").append(RankRule.ACTIVE.labelEn)
+                        .append(". Tiers are cut on the <b>campfire weight</b>; counts are shown as chosen / candidates; ")
+                        .append("share-of-Smith and share-of-visits are listed per card; column A is the fallback rate (chosen / copies ever owned).<br>\n");
+            } else {
+                html.append("<b>分档依据是原始次数</b>（不是胜率、也不是除以局数）；")
+                        .append("同表内「次数 ÷ 总数」是等比缩放，切出来的档位与按次数完全一致，")
+                        .append("所以图片主标写次数、副标写占比，两者都标注分母。");
+                if (model.scope == TierListScope.NEOW) {
+                    html.append("尼奥一行 = 一个「奖励 + 代价」选项，绝不按奖励合并；")
+                            .append("分母统一取「尼奥选择总次数」，因为 .run 里被跳过选项的代价全是 NONE，")
+                            .append("带代价的选项算不出真实选取率。<br>\n");
+                } else {
+                    html.append("<br>\n");
+                }
+                html.append("<b>Tier rule:</b> ").append(RankRule.ACTIVE.labelEn).append(". ")
+                        .append("Tiers are cut on <b>raw counts</b>; ")
+                        .append("share = count / total is shown as the secondary number. ");
+                if (model.scope == TierListScope.NEOW) {
+                    html.append("Each Neow row is one <b>bonus + cost</b> option; the denominator is all Neow selections, ")
+                            .append("not offers, because skipped costs are not recorded in .run files.<br>\n");
+                } else {
+                    html.append("<br>\n");
+                }
+            }
+        }
+        if (!rankScope) {
         html.append("<b>Method / 口径：</b> pick rate = <b>picked / offered</b> (被选取次数 / 被提供次数). ");
         html.append("Act split follows the existing TinyCat aggregation: floors &lt; 17 = Act 1, floors &gt;= 17 = after Act 1. ");
         html.append("Only A20, non-daily, non-special runs from the current save slot are included (same filter as the in-game stats). ");
@@ -334,6 +442,7 @@ public final class TierListExporter {
                 .append(escapeHtml(model.seedFilter.labelZh)).append("</b>。");
         html.append("data.csv 与所有 .xlsx 均默认中文；基础角色 4 个，ALL 是汇总而非第 5 个角色。");
         html.append("SKIP 保留，颂钵并入 SKIP；CURSE/STATUS 卡剔除。<br>\n");
+        }
         html.append("<b>Images / 图片：</b> all images are extracted from the local game at runtime (CardLibrary / RelicLibrary); SKIP and missing images use a locally generated placeholder. No network or external image source. ");
         html.append("图片全部来自本地游戏内存（CardLibrary / RelicLibrary），SKIP 和缺失图使用本地生成的占位图；不访问网络、不依赖外部图源。\n");
         html.append("</div>\n");
@@ -343,6 +452,13 @@ public final class TierListExporter {
         }
         if (new File(file.getParentFile(), "tierlist.png").isFile()) {
             html.append("<a href=\"tierlist.png\">tierlist.png</a>");
+        }
+        File charts = new File(file.getParentFile(), ExportImagePack.DIR);
+        if (charts.isDirectory()) {
+            String full = ExportImagePack.DIR + "/00-完整梯度图.jpg";
+            if (new File(file.getParentFile(), full).isFile()) {
+                html.append("<a href=\"").append(escapeHtml(full)).append("\">完整梯度图（含怪物危险度）</a>");
+            }
         }
         for (String statFile : STAT_FILES) {
             if (new File(file.getParentFile(), statFile).isFile()) {
@@ -355,10 +471,14 @@ public final class TierListExporter {
         for (TierListGroup group : model.groups) {
             html.append("<section class=\"group\">\n");
             html.append("<h2>").append(escapeHtml(group.labelZh)).append("<small>").append(escapeHtml(group.labelEn)).append("</small></h2>\n");
+            if (group.note != null && !group.note.isEmpty()) {
+                // 睡觉不参与竞争榜，但数值重要，挂在组标题下
+                html.append("<div class=\"note\">").append(escapeHtml(group.note)).append("</div>\n");
+            }
             if (group.entries.isEmpty()) {
                 html.append("<div class=\"empty\">No data / 无数据</div>\n");
             } else {
-                for (Tier tier : Tier.values()) {
+                for (Tier tier : tiersFor(model.scope)) {
                     List<TierEntry> entries = group.entriesOf(tier);
                     html.append("<div class=\"tier-row\">\n");
                     html.append("<div class=\"tier-label\" style=\"border-left-color:").append(tier.color).append("\">\n");
@@ -375,7 +495,13 @@ public final class TierListExporter {
                             html.append("<div class=\"main\"><div class=\"zh\">").append(escapeHtml(entry.nameZh)).append("</div>");
                             html.append("<div class=\"en\">").append(escapeHtml(entry.nameEn)).append("</div></div>\n");
                             html.append("<div class=\"stat\"><span class=\"pct\">").append(formatRate(entry.rate)).append("%</span>");
-                            html.append("<span class=\"cnt\">").append(entry.picked).append(" / ").append(entry.offered).append("</span></div>\n");
+                            String cnt = model.scope == TierListScope.CAMPFIRE_UPGRADE
+                                    ? "被敲 " + entry.picked + " / 候选 " + entry.offered
+                                    : entry.picked + " / " + entry.offered;
+                            if (entry.context != null && !entry.context.isEmpty()) {
+                                cnt += " · " + entry.context;
+                            }
+                            html.append("<span class=\"cnt\">").append(escapeHtml(cnt)).append("</span></div>\n");
                             html.append("</div>\n");
                         }
                     }
@@ -383,11 +509,17 @@ public final class TierListExporter {
                 }
             }
             html.append("<details class=\"table-wrap\"><summary>Table view / 表格视图</summary>\n");
-            html.append("<table><thead><tr><th>#</th><th>Name / 名称</th><th>Type</th><th>Picked / Offered</th><th>Rate</th><th>Tier</th></tr></thead><tbody>\n");
+            html.append("<table><thead><tr><th>#</th><th>Name / 名称</th><th>Type</th><th>")
+                    .append(model.scope == TierListScope.CAMPFIRE_UPGRADE
+                            ? "Chosen / Candidates 被敲/候选" : "Picked / Offered 选取/提供")
+                    .append("</th><th>Rate</th><th>Tier</th></tr></thead><tbody>\n");
             int index = 1;
             for (TierEntry entry : group.entries) {
                 html.append("<tr><td>").append(index++).append("</td><td>").append(escapeHtml(entry.nameZh)).append(" / ").append(escapeHtml(entry.nameEn));
                 html.append("</td><td>").append(escapeHtml(entry.type)).append("</td><td>").append(entry.picked).append(" / ").append(entry.offered);
+                if (entry.context != null && !entry.context.isEmpty()) {
+                    html.append("<br><small>").append(escapeHtml(entry.context)).append("</small>");
+                }
                 html.append("</td><td>").append(formatRate(entry.rate)).append("%</td><td>").append(entry.tier == null ? "" : escapeHtml(entry.tier.key)).append("</td></tr>\n");
             }
             html.append("</tbody></table></details>\n");
@@ -397,6 +529,28 @@ public final class TierListExporter {
         html.append("<footer>TinyCat ").append(MOD_VERSION).append(" · local export · data.csv / data.json / 中文统计 Excel / images/ · no external image source.</footer>\n");
         html.append("</div>\n</body>\n</html>\n");
         writeString(file, html.toString());
+    }
+
+    private static String htmlTitleSuffix(TierListScope scope) {
+        if (scope == TierListScope.CAMPFIRE) {
+            return "火堆行动梯度";
+        }
+        if (scope == TierListScope.CAMPFIRE_UPGRADE) {
+            return "火堆偏好";
+        }
+        if (scope == TierListScope.SHOP) {
+            return "商店行动梯度";
+        }
+        if (scope == TierListScope.NEOW) {
+            return "尼奥选项梯度";
+        }
+        if (scope != null && scope.isRankBased()) {
+            return "排名梯度";
+        }
+        if (scope == null) {
+            return "全量梯度";
+        }
+        return "抓率梯度";
     }
 
     private static void writeReadme(TierListModel model, File file) throws IOException {
@@ -424,12 +578,16 @@ public final class TierListExporter {
         text.append("*.xlsx        - Chinese Excel workbooks following the in-game stats pages:\n");
         text.append("                总体统计 / 第一幕卡牌选取率 / 第一幕后卡牌选取率 / 卡组中的卡牌胜率 /\n");
         text.append("                尼奥奖励 / BOSS遗物 / 遭遇战伤害（战损、受到伤害、有无回复）/\n");
-        text.append("                遭遇战死亡率与药水 / 遗物胜率 / 各幕事件胜率 / 火堆行动 / 商店行动\n");
+        text.append("                怪物危险度（怪物危险度梯度，按幕 T0-T4 分档）/ \n");
+        text.append("                遭遇战死亡率与药水 / 遗物胜率 / 各幕事件胜率 / 火堆行动 / 商店行动 /\n");
+        text.append("                火堆偏好（选项权重 + 被敲次数 ÷ 当前候选卡种数，附 A 升级率）\n");
         text.append("                同类页面合并为一个工作簿，每个统计页对应独立工作表；\n");
         text.append("                全部导出时生成以上全部文件，单页导出只生成该页对应的工作簿\n");
         text.append("tierlist.html - self-contained visual tier list (open in any browser)\n");
         text.append("tierlist.jpg  - shareable full tier-list image (JPEG)\n");
         text.append("tierlist.png  - shareable full tier-list image (lossless PNG)\n");
+        text.append("图表/         - 一图完整（00-完整梯度图，含怪物危险度）+ 按指标页分图（01 起）\n");
+        text.append("                每张都有 .png（无损）和 .jpg（体积小）两种\n");
         text.append("images/       - card portraits, boss relic icons, SKIP placeholder\n");
         text.append("README.txt    - this file\n\n");
 
@@ -448,13 +606,51 @@ public final class TierListExporter {
 
         text.append("Tier rules / 分档\n");
         text.append("-----------------\n");
-        for (Tier tier : Tier.values()) {
-            text.append(String.format(Locale.US, "%-5s %-16s %s\n", tier.key, tier.labelEn, tier.labelZh));
+        if (model.scope != null && model.scope.isRankBased()) {
+            text.append(RankRule.ACTIVE.describeZh()).append("\n");
+            text.append(RankRule.ACTIVE.describeEn()).append("\n");
+            text.append("排名型表不用固定百分比阈值：火堆头名占比约 24.8%、商店约 10.6%、尼奥选项占比按选中次数计，\n");
+            text.append("同一套阈值会全挤在一档。档内仍按指标降序，并标出实际占比，方便看档内跨度。\n");
+            text.append("Metrics: 火堆 = 次数 ÷ 该幕火堆行动总数；商店 = 次数 ÷ 该幕购买总次数；\n");
+            text.append("火堆偏好 = 同一批火堆访问上的三层分母：\n");
+            text.append("  行动构成 = 锻造/睡觉/回忆/抽烟/举重/挖掘次数 ÷ 火堆访问次数（见工作簿的火堆构成表）；\n");
+            text.append("  火堆权重(W) = 该卡被敲次数 ÷ 它出现在候选里的次数（每次锻造的分母 = 当时未升级卡牌种类数，同名算 1 个）；\n");
+            text.append("  随机基线 = 100 ÷ 该幕平均候选卡种数；倍数 = 火堆权重 ÷ 随机基线；\n");
+            text.append("  A 升级率(替补) = 该幕锻造次数 ÷ 到该幕结束累计拥过副本数，不受删牌影响，标 * 的条目以它为准；\n");
+            text.append("  桥接层 = 升级次数 ÷ 锻造次数（占锻造）、升级次数 ÷ 火堆访问次数（占火堆）。\n");
+            text.append("  统一榜：把「升级」拆回每张可敲的牌，和抽烟/举重/挖掘/回忆放在同一张榜上按占比排序；\n");
+            text.append("         分母 = 该次火堆的「池子」= 可敲卡种 + 可用遗物行动 + 可用回忆，随机基线 = 100 ÷ 平均池子大小；\n");
+            text.append("         所以卡牌和遗物行动的倍数可以互相比较。\n");
+            text.append("  睡觉单列：它的约束是血量，不属于「从这些里挑一个」的竞争，不进池子，分母是火堆访问次数。\n");
+            text.append("尼奥 = 该选项被选中次数 ÷ 尼奥选择总次数（.run 里被跳过选项的代价全是 NONE，\n");
+            text.append("带代价的选项无法还原真实提供次数，所以不标「选取率」）。\n");
+            text.append("火堆偏好只统计火堆锻造（不含磨刀石/战锤/课程/事件升级）；\n");
+            text.append("候选按初始牌组 + 抓取 + 商店 + 事件 + 变牌（含星盘/空鸟笼双向补差）逐层重放。\n");
+            text.append("  · 蛋（Molten/Toxic/Frozen）升级的牌：card_choices 的 picked 带 +1，已识别，不会进候选；\n");
+            text.append("  · War Paint/Whetstone 只记遗物、不记升了哪两张，这部分候选偏大约 1.5%，只影响排名尾部；\n");
+            text.append("  · B 口径（÷当时拥有）已剔除：分子含已被删的副本、分母不含，会饱和到 100% 以上。\n\n");
+
+            text.append("Sample size / 样本量\n");
+            text.append("--------------------\n");
+            text.append("游戏内不设下限，n=1 也会算出来；但倍数的置信区间随 n 迅速变宽，按下面的量级读：\n");
+            text.append("  候选次数 n      95% 置信区间（p≈50% 时）   怎么用\n");
+            text.append("  n < 10          看不出来方向               只看「有没有被敲过」\n");
+            text.append("  10 ≤ n < 30     ±20~30pp                   大致量级，别排名\n");
+            text.append("  30 ≤ n < 100    ±10~18pp                   能排序，相邻档可能互换\n");
+            text.append("  n ≥ 100         ±10pp 以内                稳定\n");
+            text.append("经验值：单卡候选 30 次能看出量级，100 次排名稳定；\n");
+            text.append("分幕看时每幕至少 50 局，否则该幕的单卡候选普遍不足 30 次。\n");
+            text.append("原理：权重 p 的标准误 = sqrt(p(1-p)/n)，倍数 = p ÷ 基线，p 抖 ±5pp，倍数就抖 ±0.35。\n");
+            text.append("Sample size: every entry is listed regardless of n; read multipliers at n >= 30 and rank at n >= 100.\n\n");
+        } else {
+            for (Tier tier : tiersFor(model.scope)) {
+                text.append(String.format(Locale.US, "%-5s %-16s %s\n", tier.key, tier.labelEn, tier.labelZh));
+            }
+            text.append("Pick rate = picked / offered (raw counts, not rounded before tiering).\n");
+            text.append("0% tier is exactly picked == 0 with offered > 0.\n");
+            text.append("F covers 0 < rate < 15% (including 0.1%-0.9%).\n");
+            text.append("SKIP is kept; Singing Bowl is merged into SKIP; CURSE/STATUS cards are excluded.\n\n");
         }
-        text.append("Pick rate = picked / offered (raw counts, not rounded before tiering).\n");
-        text.append("0% tier is exactly picked == 0 with offered > 0.\n");
-        text.append("F covers 0 < rate < 15% (including 0.1%-0.9%).\n");
-        text.append("SKIP is kept; Singing Bowl is merged into SKIP; CURSE/STATUS cards are excluded.\n\n");
 
         text.append("Images / 图片\n");
         text.append("-------------\n");

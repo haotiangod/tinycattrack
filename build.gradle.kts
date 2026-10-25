@@ -40,7 +40,7 @@ var stsJar: String = "$stsInstallLocation/desktop-1.0.jar"
 var modName: String = rootProject.name
 
 // 自定义版本号，每次测试时修改此处
-var versionTag: String = "V4.2.2"
+var versionTag: String = "V4.5.3"
 
 // JAR 文件命名：使用 ModTheSpire.json 中的 modid
 var jarBaseName: String = "TinyCat"
@@ -111,11 +111,43 @@ tasks.register<Jar>("buildJAR") {
     })
 }
 
-tasks.register<Jar>("buildTrackerTestJAR") {
+// 内部测试用：把本地怪物图包打进 jar（tinycat/monsters/*.png）
+// 图来自 mods/TinyCat/monster-images，不进仓库、不对外分发（CC BY-NC-SA，见 docs/STATE-NOTES-AND-GOLD.md）
+tasks.register<Jar>("buildJARWithImages") {
     group = "Slay the Spire"
+    description = "内部测试用：把本地怪物图包打进 jar，生成 ${jarBaseName}_${versionTag}_images.jar"
+
+    archiveFileName.set("${jarBaseName}_${versionTag}_images.jar")
+
+    from(sourceSets.main.get().output)
+
+    dependsOn(configurations.runtimeClasspath)
+    from({
+        configurations.runtimeClasspath.get().filter {
+            it.name.endsWith("jar")
+        }.map {
+            zipTree(it)
+        }
+    })
+
+    from(fileTree("$stsInstallLocation/mods/TinyCat/monster-images") { include("*.png") }) {
+        into("tinycat/monsters")
+    }
+}
+
+tasks.register<Copy>("buildAndCopyJARWithImages") {
+    group = "Slay the Spire"
+    description = "把带图的内部测试 jar 复制到 \$STS_INSTALL/mods（会与普通版同名 modid 冲突，留意只保留一个）"
+
+    dependsOn("buildJARWithImages")
+    from("build/libs/${jarBaseName}_${versionTag}_images.jar")
+    into("$stsInstallLocation/mods")
+}
+
+tasks.register<Jar>("buildTrackerTestJAR") {    group = "Slay the Spire"
     description = "Builds the optional TinyCat tracker test mod JAR"
 
-    archiveFileName.set("TinyCatTrackerTest_V0.1.0.jar")
+    archiveFileName.set("TinyCatTrackerTest_V0.2.0.jar")
     from(sourceSets["trackerTest"].output)
 }
 

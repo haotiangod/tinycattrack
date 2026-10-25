@@ -41,72 +41,12 @@ public final class MonsterTierBuilder {
     private static final String[] ACT_ZH = {"第一幕", "第二幕", "第三幕"};
 
     private static final Set<String> BOSS_NAMES = new HashSet<String>();
-    private static final Map<String, String> NAME_ZH = new HashMap<String, String>();
 
     static {
         Collections.addAll(BOSS_NAMES,
                 "Hexaghost", "Slime Boss", "The Guardian",
                 "Collector", "Automaton", "Champ",
                 "Time Eater", "Awakened One", "Donu and Deca");
-
-        NAME_ZH.put("Small Slimes", "小史莱姆");
-        NAME_ZH.put("Jaw Worm", "大颚虫");
-        NAME_ZH.put("Cultist", "邪教徒");
-        NAME_ZH.put("2 Louse", "两只虱虫");
-        NAME_ZH.put("Lagavulin", "乐加维林");
-        NAME_ZH.put("Gremlin Nob", "地精大块头");
-        NAME_ZH.put("3 Sentries", "三哨卫");
-        NAME_ZH.put("The Guardian", "守护者");
-        NAME_ZH.put("Hexaghost", "六火亡魂");
-        NAME_ZH.put("Slime Boss", "史莱姆老大");
-        NAME_ZH.put("Looter", "掠夺者");
-        NAME_ZH.put("Blue Slaver", "蓝奴隶主");
-        NAME_ZH.put("2 Fungi Beasts", "两只真菌兽");
-        NAME_ZH.put("Large Slime", "大史莱姆");
-        NAME_ZH.put("3 Louse", "三只虱虫");
-        NAME_ZH.put("Exordium Wildlife", "前庭群兽");
-        NAME_ZH.put("Exordium Thugs", "前庭暴徒");
-        NAME_ZH.put("Gremlin Gang", "地精团伙");
-        NAME_ZH.put("Red Slaver", "红奴隶主");
-        NAME_ZH.put("Lots of Slimes", "史莱姆群");
-        NAME_ZH.put("Book of Stabbing", "扎刺之书");
-        NAME_ZH.put("Gremlin Leader", "地精头目");
-        NAME_ZH.put("Slavers", "奴隶主小队");
-        NAME_ZH.put("Centurion and Healer", "百夫长与治疗师");
-        NAME_ZH.put("Snake Plant", "蛇形植物");
-        NAME_ZH.put("2 Thieves", "两个盗贼");
-        NAME_ZH.put("3 Byrds", "三只鸟");
-        NAME_ZH.put("Spheric Guardian", "球形守护者");
-        NAME_ZH.put("Shell Parasite", "甲壳寄生虫");
-        NAME_ZH.put("Chosen", "被选者");
-        NAME_ZH.put("Snecko", "蛇蜥");
-        NAME_ZH.put("Collector", "收藏家");
-        NAME_ZH.put("Champ", "冠军");
-        NAME_ZH.put("Automaton", "铜制机械人偶");
-        NAME_ZH.put("Shelled Parasite and Fungi", "甲壳寄生虫与真菌兽");
-        NAME_ZH.put("3 Cultists", "三邪教徒");
-        NAME_ZH.put("Cultist and Chosen", "邪教徒与被选者");
-        NAME_ZH.put("Chosen and Byrds", "被选者与鸟");
-        NAME_ZH.put("Sentry and Sphere", "哨卫与球体");
-        NAME_ZH.put("3 Darklings", "三只暗灵");
-        NAME_ZH.put("Giant Head", "大头");
-        NAME_ZH.put("Nemesis", "复仇女神");
-        NAME_ZH.put("Reptomancer", "训蛇师");
-        NAME_ZH.put("Time Eater", "时间吞噬者");
-        NAME_ZH.put("Awakened One", "觉醒者");
-        NAME_ZH.put("Orb Walker", "球状行者");
-        NAME_ZH.put("3 Shapes", "三种形状");
-        NAME_ZH.put("Donu and Deca", "多努与迪卡");
-        NAME_ZH.put("Jaw Worm Horde", "大颚虫群");
-        NAME_ZH.put("Spire Growth", "高塔增生");
-        NAME_ZH.put("Sphere and 2 Shapes", "球体与两种形状");
-        NAME_ZH.put("Writhing Mass", "蠕动巨块");
-        NAME_ZH.put("Transient", "瞬变");
-        NAME_ZH.put("Maw", "巨口");
-        NAME_ZH.put("4 Shapes", "四种形状");
-        NAME_ZH.put("Shield and Spear", "盾与矛");
-        NAME_ZH.put("The Heart", "腐化心脏");
-        NAME_ZH.put("2 Orb Walkers", "两个球状行者");
     }
 
     private MonsterTierBuilder() {
@@ -163,33 +103,25 @@ public final class MonsterTierBuilder {
 
             List<MonsterTierEntry> bosses = new ArrayList<MonsterTierEntry>();
             List<MonsterTierEntry> nonBosses = new ArrayList<MonsterTierEntry>();
+            // 不再有"样本不足附录"：所有条目都参与分档，只在条目上用 lowSample 标注。
             List<MonsterTierEntry> lowSampleEntries = new ArrayList<MonsterTierEntry>();
+            int flagged = 0;
 
             int bossRank = 0;
             for (Sample sample : sortedSamples(bossMap)) {
-                if (sample.size() < bossMinSample) {
-                    lowSampleEntries.add(entry(sample, null, 0, 0,
-                            bossSampleTotal, bossNetHpLoss));
-                } else {
-                    bossRank++;
-                    bosses.add(entry(sample, MonsterTier.T0, bossRank, 0,
-                            bossSampleTotal, bossNetHpLoss));
+                boolean low = sample.size() < bossMinSample;
+                bossRank++;
+                bosses.add(entry(sample, MonsterTier.T0, bossRank, 0,
+                        bossSampleTotal, bossNetHpLoss, low));
+                if (low) {
+                    flagged++;
                 }
             }
 
-            List<Sample> eligible = new ArrayList<Sample>();
-            for (Sample sample : sortedSamples(nonBossMap)) {
-                if (sample.size() < nonBossMinSample) {
-                    lowSampleEntries.add(entry(sample, null, 0, 0,
-                            nonBossSampleTotal, nonBossNetHpLoss));
-                } else {
-                    eligible.add(sample);
-                }
-            }
-            appendNonBossTiers(eligible, nonBosses, nonBossSampleTotal, nonBossNetHpLoss);
-            sortLowSample(lowSampleEntries);
+            flagged += appendNonBossTiers(sortedSamples(nonBossMap), nonBosses,
+                    nonBossSampleTotal, nonBossNetHpLoss, nonBossMinSample);
 
-            lowSampleTotal += lowSampleEntries.size();
+            lowSampleTotal += flagged;
             groups.add(new MonsterTierGroup(act, ACT_EN[act - 1], ACT_ZH[act - 1],
                     bosses, nonBosses, lowSampleEntries,
                     bossSampleTotal, nonBossSampleTotal,
@@ -292,23 +224,31 @@ public final class MonsterTierBuilder {
         return list;
     }
 
-    private static void appendNonBossTiers(List<Sample> sorted,
+    /** 等人数分 T1-T4；样本不足的条目照样分档，只是打上 lowSample 标记。返回被标记的数量。 */
+    private static int appendNonBossTiers(List<Sample> sorted,
                                            List<MonsterTierEntry> target,
                                            int categorySamples,
-                                           int categoryNetHpLoss) {
+                                           int categoryNetHpLoss,
+                                           int minSample) {
         int total = sorted.size();
         int base = total / 4;
         int extra = total % 4;
         int index = 0;
+        int flagged = 0;
         MonsterTier[] tiers = {MonsterTier.T1, MonsterTier.T2, MonsterTier.T3, MonsterTier.T4};
         for (int tierIndex = 0; tierIndex < tiers.length; tierIndex++) {
             int count = base + (tierIndex < extra ? 1 : 0);
             for (int rank = 1; rank <= count; rank++) {
                 Sample sample = sorted.get(index++);
+                boolean low = sample.size() < minSample;
                 target.add(entry(sample, tiers[tierIndex], rank, index,
-                        categorySamples, categoryNetHpLoss));
+                        categorySamples, categoryNetHpLoss, low));
+                if (low) {
+                    flagged++;
+                }
             }
         }
+        return flagged;
     }
 
     private static void sortLowSample(List<MonsterTierEntry> entries) {
@@ -349,7 +289,8 @@ public final class MonsterTierBuilder {
                                           int tierRank,
                                           int nonBossRank,
                                           int categorySamples,
-                                          int categoryNetHpLoss) {
+                                          int categoryNetHpLoss,
+                                          boolean lowSample) {
         double[] values = sample.values();
         double mean = mean(values);
         double std = stddev(values, mean);
@@ -362,7 +303,7 @@ public final class MonsterTierBuilder {
         return new MonsterTierEntry(
                 sample.name,
                 sample.name,
-                NAME_ZH.containsKey(sample.name) ? NAME_ZH.get(sample.name) : sample.name,
+                MonsterNames.displayName(sample.name),
                 sample.type(),
                 values.length,
                 sampleShare,
@@ -375,7 +316,8 @@ public final class MonsterTierBuilder {
                 mean + halfWidth,
                 tier,
                 tierRank,
-                nonBossRank);
+                nonBossRank,
+                lowSample);
     }
 
     private static double mean(double[] values) {

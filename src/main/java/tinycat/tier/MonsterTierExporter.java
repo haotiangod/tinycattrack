@@ -48,6 +48,31 @@ public final class MonsterTierExporter {
     private MonsterTierExporter() {
     }
 
+    /**
+     * 供「全部导出」复用：把战损梯度表写进已经建好的导出目录。
+     * 不新建目录、不单独打包 zip，图片直接落到 root/images/monsters。
+     *
+     * @return 构建好的模型，调用方可以继续用它渲染图表
+     */
+    public static MonsterTierModel writeInto(MoreStatsScreen screen, File root) throws Exception {
+        MonsterTierModel model = MonsterTierBuilder.build(screen);
+        File cacheDir = new File(System.getProperty("java.io.tmpdir"), "TinyCat/monster-cache");
+        try {
+            cacheDir = Gdx.files.local(EXPORT_ROOT + "/cache/v1").file();
+        } catch (Exception ignored) {
+            // Gdx 未初始化时退回临时目录，缓存只是加速用
+        }
+        ensureCacheReadme(cacheDir);
+        MonsterImageLibrary images = new MonsterImageLibrary(new File(root, "images"), cacheDir);
+        for (MonsterTierGroup group : model.groups) {
+            for (MonsterTierEntry entry : group.allEntries()) {
+                entry.imagePath = images.export(entry);
+            }
+        }
+        writeWorkbook(model, new File(root, WORKBOOK));
+        return model;
+    }
+
     public static String export(MoreStatsScreen screen) throws Exception {
         MonsterTierModel model = MonsterTierBuilder.build(screen);
         File exportRoot = Gdx.files.local(EXPORT_ROOT).file();
@@ -112,7 +137,7 @@ public final class MonsterTierExporter {
         for (MonsterTierGroup group : model.groups) {
             String extra = "Boss 门槛 " + model.bossMinSample + " 样本；非 Boss 门槛 "
                     + model.nonBossMinSample + " 样本"
-                    + "；本幕低样本 " + group.lowSampleCount + " 项（保留展示，不参与分档）"
+                    + "；本幕样本不足 " + group.lowSampleFlagged + " 项（仍参与分档，条目右下角标注）"
                     + "；事件战与第四幕固定战不计入";
             XlsxWriter.Sheet sheet = newSheet(wb,
                     group.labelZh,
@@ -147,10 +172,11 @@ public final class MonsterTierExporter {
         rules.width(1, 110.0D);
         rule(rules, "主指标", "平均实际战损 = 进入该层前 HP − 该层结束 HP。正值掉血，负值表示净回血。");
         rule(rules, "样本单位", "每次遭遇计 1 个样本；同一遭遇在不同对局中分别计入。");
-        rule(rules, "样本门槛", "Boss 每项至少 " + model.bossMinSample + " 个样本；非 Boss 单角色至少 "
-                + MonsterTierBuilder.SINGLE_CHARACTER_MIN_SAMPLE + " 个，全角色汇总至少 "
+        rule(rules, "样本参考值", "Boss " + model.bossMinSample + " 个样本；非 Boss 单角色 "
+                + MonsterTierBuilder.SINGLE_CHARACTER_MIN_SAMPLE + " 个，全角色汇总 "
                 + MonsterTierBuilder.AGGREGATE_MIN_SAMPLE
-                + " 个。低于门槛的条目保留在每幕末尾，标注“样本不足”，不参与 T0-T4 分档。");
+                + " 个。低于参考值的条目<b>照常参与分档</b>，只在“备注”/条目右下角标注“样本不足”，"
+                + "提示该档位结论不一定稳定。");
         rule(rules, "样本占比", "该遭遇样本数 ÷ 同幕同类（Boss 或非 Boss）样本总数，用于判断数据集中度。");
         rule(rules, "净战损合计", "该遭遇所有样本的实际战损之和；负值表示该遭遇总体净回血。");
         rule(rules, "战损贡献占比", "该遭遇净战损合计 ÷ 同幕同类净战损合计；同类净战损合计 ≤ 0 时显示 —。");
@@ -185,7 +211,9 @@ public final class MonsterTierExporter {
                 XlsxWriter.Cell.decimal(entry.sampleShare),
                 XlsxWriter.Cell.integer(entry.totalHpLoss),
                 shareCell(entry.lossShare),
-                XlsxWriter.Cell.text(note));
+                XlsxWriter.Cell.text(entry.lowSample
+                        ? (note == null || note.isEmpty() ? "样本不足" : note + "；样本不足")
+                        : (note == null ? "" : note)));
     }
 
     private static XlsxWriter.Cell shareCell(double value) {
@@ -246,7 +274,7 @@ public final class MonsterTierExporter {
                     writer.write(',');
                     writer.write(formatShare(entry.lossShare));
                     writer.write(',');
-                    writer.write(Boolean.toString(!entry.isRanked()));
+                    writer.write(Boolean.toString(entry.lowSample));
                     writer.write(',');
                     writer.write(csv(imagePath(entry)));
                     writer.write('\n');
@@ -300,8 +328,8 @@ public final class MonsterTierExporter {
         tiering.put("method", "equal-count rank slices by mean actual HP loss within each act");
         tiering.put("fixed_thresholds", false);
         tiering.put("low_sample_policy",
-                "entries below the sample gate keep statistics and contribution fields, "
-                        + "have tier=null, and are excluded from T0-T4");
+                "no entry is excluded: every entry is tiered (T0-T4) and entries below the "
+                        + "sample reference are flagged low_sample=true for display only");
         tiering.put("excluded", Arrays.asList("event encounters", "Act 4 fixed encounters",
                 "treasure/reward floors"));
         root.put("tiering", tiering);
@@ -327,7 +355,7 @@ public final class MonsterTierExporter {
             groupJson.put("non_boss_samples", group.nonBossSampleTotal);
             groupJson.put("boss_net_hp_loss", group.bossNetHpLoss);
             groupJson.put("non_boss_net_hp_loss", group.nonBossNetHpLoss);
-            groupJson.put("low_sample_count", group.lowSampleCount);
+            groupJson.put("low_sample_count", group.lowSampleFlagged);
             List<Map<String, Object>> entries = new ArrayList<Map<String, Object>>();
             for (MonsterTierEntry entry : group.allEntries()) {
                 Map<String, Object> item = new LinkedHashMap<String, Object>();
@@ -335,7 +363,7 @@ public final class MonsterTierExporter {
                 item.put("name_en", entry.nameEn);
                 item.put("name_zh", entry.nameZh);
                 item.put("type", entry.type);
-                item.put("low_sample", !entry.isRanked());
+                item.put("low_sample", entry.lowSample);
                 item.put("tier", entry.tier == null ? null : entry.tier.key);
                 item.put("tier_rank", entry.tierRank <= 0 ? null : entry.tierRank);
                 item.put("non_boss_rank", entry.nonBossRank <= 0 ? null : entry.nonBossRank);
@@ -407,7 +435,8 @@ public final class MonsterTierExporter {
         html.append(".entry .hp{display:block;font-size:15px;font-weight:800;color:var(--gold);white-space:nowrap}\n");
         html.append(".entry .meta{display:block;font-size:10px;color:var(--muted);white-space:nowrap}\n");
         html.append(".empty{color:var(--muted);font-size:13px;padding:6px 0}\n");
-        html.append(".entry.low{border-style:dashed;opacity:.92}\n");
+        html.append(".entry.low{border-style:dashed}\n");
+        html.append(".badge{display:inline-block;margin-top:2px;padding:1px 5px;border-radius:4px;background:#2a2314;color:var(--gold);font-size:10px;font-weight:700}\n");
         html.append("tr.low td{color:var(--muted)}\n");
         html.append("details.table-wrap{margin:8px 0 0;color:var(--muted);font-size:12px}\n");
         html.append("details.table-wrap summary{cursor:pointer;color:var(--gold);margin:4px 0}\n");
@@ -437,7 +466,7 @@ public final class MonsterTierExporter {
                 .append(model.nonBossMinSample)
                 .append(" 个样本的遭遇项不参与分档，但保留在每幕末尾的<b>“样本不足”</b>区。");
         if (model.lowSampleCount > 0) {
-            html.append("本次低样本共 ").append(model.lowSampleCount).append(" 项。");
+            html.append("本次被标注“样本不足”的条目共 ").append(model.lowSampleCount).append(" 项（仍参与分档）。");
         }
         html.append("中位数、P90、95%CI、样本占比与战损贡献仅作辅助参考。<br>\n");
         html.append("<b>Images / 图片：</b>读取本地游戏目录 mods/TinyCat/monster-images；不访问网络。缺失图使用本地占位图。多敌遭遇使用代表图。");
@@ -513,9 +542,11 @@ public final class MonsterTierExporter {
                     .append("<th>Mean HP loss</th><th>Median</th><th>P90</th><th>95% CI</th><th>n</th>")
                     .append("<th>Sample %</th><th>Net HP loss</th><th>Contribution %</th></tr></thead><tbody>\n");
             for (MonsterTierEntry entry : group.allEntries()) {
-                boolean low = !entry.isRanked();
+                boolean low = entry.lowSample;
                 html.append(low ? "<tr class=\"low\">" : "<tr>");
-                html.append("<td>").append(low ? "低样本" : escapeHtml(entry.tier.key))
+                html.append("<td>").append(low
+                        ? escapeHtml(entry.tier.key) + " *"
+                        : escapeHtml(entry.tier.key))
                         .append("</td><td>")
                         .append(entry.tierRank <= 0 ? "—" : Integer.toString(entry.tierRank)).append("</td><td>")
                         .append(escapeHtml(entry.nameZh)).append(" / ")
@@ -542,7 +573,7 @@ public final class MonsterTierExporter {
     }
 
     private static void appendEntryCard(StringBuilder html, MonsterTierEntry entry) {
-        boolean low = !entry.isRanked();
+        boolean low = entry.lowSample;
         html.append("<div class=\"entry").append(low ? " low" : "").append("\" title=\"")
                 .append(escapeHtml(entry.nameEn)).append(" | ")
                 .append(escapeHtml(entry.typeEn()))
@@ -564,7 +595,11 @@ public final class MonsterTierExporter {
                 .append(" · 样本 ").append(formatShare(entry.sampleShare)).append("%")
                 .append(" · 贡献 ").append(formatShare(entry.lossShare)).append("%</span>");
         html.append("<span class=\"meta\">CI ").append(formatNumber(entry.ci95Low))
-                .append("~").append(formatNumber(entry.ci95High)).append("</span></div>\n");
+                .append("~").append(formatNumber(entry.ci95High)).append("</span>");
+        if (low) {
+            html.append("<span class=\"badge\">样本不足 n=").append(entry.sampleCount).append("</span>");
+        }
+        html.append("</div>\n");
         html.append("</div>\n");
     }
 

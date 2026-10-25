@@ -5,7 +5,7 @@
     "tinycat"
   ],
   "description": "Local run statistics tracking - Pure offline mode",
-  "version": "4.2.2",
+  "version": "4.5.3",
   "sts_version": "07-30-2020",
   "mts_version": "3.15.0",
   "dependencies": [

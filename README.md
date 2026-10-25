@@ -11,12 +11,13 @@
 | 项目 | 内容 |
 |------|------|
 | ModID | `TinyCat` |
-| 版本 | 4.2.2 |
+| 版本 | 4.2.2（工作区有未发布改动） |
 | 作者 | tinycat |
 | 依赖 | BaseMod, RunHistoryPlus |
 | 许可证 | MPL-2.0 |
 
-数据流与统计口径见 [docs/DATA-FLOW.md](docs/DATA-FLOW.md)，金币/血量追踪与 StateNotes 许可证评估见 [docs/STATE-NOTES-AND-GOLD.md](docs/STATE-NOTES-AND-GOLD.md)。
+**想搞清楚每个数字是怎么算出来的 → [docs/CORE-LOGIC.md](docs/CORE-LOGIC.md)（全指标公式、分母口径、代码位置、已知坑、改代码协议）**。
+数据流见 [docs/DATA-FLOW.md](docs/DATA-FLOW.md)，口径变更留痕见 [docs/ALGORITHM-AUDIT.md](docs/ALGORITHM-AUDIT.md)，金币/血量追踪与 StateNotes 许可证评估见 [docs/STATE-NOTES-AND-GOLD.md](docs/STATE-NOTES-AND-GOLD.md)。
 
 ---
 
@@ -61,7 +62,7 @@ tinycat/
 ├── location/
 │   ├── uilocalization/           # strings.json / strings-zh.json
 │   └── chinese_english_mapping.json
-├── docs/                         # 数据流与金币评估文档
+├── docs/                         # CORE-LOGIC（口径权威）/ ALGORITHM-AUDIT（变更留痕）/ DATA-FLOW / STATE-NOTES
 ├── scripts/
 │   ├── validate_gold_estimate.py # 金币估算 / 追踪数据校验
 │   └── download_monster_images.py # 从灰机 wiki 生成本地怪物图包（不提交图片）
@@ -83,7 +84,7 @@ tinycat/
 - 总体：胜率、死亡数、游戏时间、最高分、最高连胜。
 - 卡牌：第一幕 / 第一幕后选牌率与胜率。
 - Neow 奖励、Boss 遗物（含交换）、战斗遭遇、事件、遗物、商店遗物。
-- 删牌来源（商店 / 事件 / Neow / 篝火 / 空鸟笼）、问号节点、火堆行动、商店行动。
+- 删牌来源（商店 / 事件 / Neow / 篝火 / 空鸟笼）、问号节点、火堆行动、商店行动、火堆偏好。
 - 伤害：平均承受伤害、实际 HP 损失（含/不含治疗）。
 
 ### 筛选
@@ -93,16 +94,22 @@ tinycat/
 
 ### 导出
 - 在统计页右上角点击“导出”，生成 Tier List、中文 Excel 统计工作簿、HTML、`tierlist.jpg/png` 及卡图/遗物图。
-- “全部导出”按游戏内统计分页生成 12 个 `.xlsx`：总体、两张卡牌选取率、卡牌胜率、尼奥、Boss 遗物、遭遇战伤害（三张表）、死亡率与药水、遗物、事件、火堆、商店。
+- “全部导出”按游戏内统计分页生成 13 个 `.xlsx`：总体、两张卡牌选取率、卡牌胜率、尼奥、Boss 遗物、遭遇战伤害（三张表）、死亡率与药水、遗物、事件、火堆、商店、火堆偏好。
 - 同类页面合并：Boss 遗物选取/胜率、死亡率/药水、遗物胜率/购买胜率各为一个工作簿；卡牌选取率保持第一幕/第一幕后两个独立文件。
 - 表头、表名、取值和说明默认中文，卡牌/遗物/事件保留英文名辅助列。
+- **“全部导出”会额外并入战损梯度表**：`怪物危险度.xlsx` + `images/monsters/`，并生成 `图表/` 目录：
+  - `00-完整梯度图.png/.jpg`：卡牌抓率 + BOSS 遗物 + 怪物危险度，**一张图发完**；
+  - `01-…` 起：按前端指标页拆开的单页图（第一幕卡牌 / 第一幕后卡牌 / BOSS 遗物 / 怪物危险度三幕）。
+- 单页导出（只导卡牌或只导 BOSS 遗物）不会带怪物危险度。
 - 图片取自本地游戏资源并缓存，重复导出不重复提取。
 - 导出结果只显示“导出完成/失败”，完整路径写入日志。
 
 ### 怪物危险度梯度
 - 按幕统计 Boss 与非 Boss（含精英）的平均实际战损，Boss 单独 T0，非 Boss 等人数分 T1-T4。
-- 样本门槛分层：Boss ≥ 5；单角色非 Boss ≥ 10；全角色汇总非 Boss ≥ 30。
-- 低于门槛的条目保留在“样本不足”附录，展示统计量与贡献列，但不参与分档。
+- **不做样本下限过滤**：所有遭遇都参与 T0-T4 分档。Boss ≥ 5、单角色非 Boss ≥ 10、全角色汇总非 Boss ≥ 30 只作为"样本参考值"，
+  低于参考值的条目在图片/HTML 条目右下角标注「样本不足 n=X」、xlsx 备注列写「样本不足」，提醒结论不稳定，但仍照常排名。
+- 名称优先读 TinyCat 自带汉化包（`location/chinese_english_mapping.json` 的「怪物名称映射」段，社区叫法如 六火亡魂 / 乐嘉 / 三柱 / 蟹粥），
+  未命中再回退游戏内 `monsters.json` / `RunHistoryMonsterNames` 官方译名。
 - 每个条目附带样本占比、净战损合计和战损贡献占比，用于判断样本集中度与总战损来源。
 
 ---
@@ -198,11 +205,21 @@ gradle buildJAR
 
 # 可选：构建金币/首层 HP 校准用的独立测试 Mod
 gradle buildTrackerTestJAR
+
+# 可选（内部测试用）：把本地怪物图包打进 jar，单文件即可带图
+gradle buildJARWithImages
 ```
 
 产物：
-- 主 Mod：`build/libs/TinyCat_V4.2.2.jar`
-- 测试 Mod：`build/libs/TinyCatTrackerTest_V0.1.0.jar`
+- 主 Mod（不含图）：`build/libs/TinyCat_V4.2.2.jar`
+- 主 Mod（**带图**，内部测试）：`build/libs/TinyCat_V4.2.2_images.jar`（约 6.8 MB）
+- 测试 Mod：`build/libs/TinyCatTrackerTest_V0.2.0.jar`
+
+带图版说明：
+- 图来自 `mods/TinyCat/monster-images/*.png`（64 张遭遇别名图），构建时打进 `tinycat/monsters/`；
+  运行时 `MonsterImageLibrary` 仍**优先读**外部目录，所以想验证 jar 内图，把那个目录临时改名即可。
+- 图是灰机 wiki 的 CC BY-NC-SA 内容 + Mega Crit 素材，**只能内部测试**，不要上传创意工坊或随包分发。
+- 带图版与普通版 modid 相同，`mods/` 里只能留一个。
 
 ### 安装
 将 JAR 放入游戏的 `mods/` 目录。升级前删除旧版本 JAR，避免同时加载两个 TinyCat。
@@ -237,6 +254,20 @@ python scripts/validate_gold_estimate.py
 - 新旧幕边界算法的差异；
 - 奖励/过渡层上仍发生战斗或事件的数量。
 
+### 导出包校验（verify_export.py）
+
+不信任导出结果时，用原始 `.run` 独立复算再和导出包逐项比对：
+
+```bash
+python scripts/verify_export.py "<tierlist-export/TinyCat_TierList_XXX_时间>" --class DEFECT
+```
+
+会读 `总体统计.xlsx / 遭遇战伤害.xlsx / 怪物危险度.xlsx / data.csv`，复算并逐项打 OK / DIFF：
+对局数、胜场、总层数、击杀、分数、金币估算、删牌五来源、问号与事件数、卡牌抓率、
+每个遭遇的平均战损（含每幕战斗总计）、梯度表档位/样本/均值，以及「全角色汇总」行。
+
+> 复刻的口径全部来自 `docs/CORE-LOGIC.md`；若导出后出现 DIFF，先确认它是口径差异还是真 bug。
+
 ---
 
 ## 已知限制
@@ -253,6 +284,39 @@ python scripts/validate_gold_estimate.py
 ---
 
 ## 更新日志
+
+### 未发布（本地工作区，版本号待定）
+
+> 以下改动都在工作区里，尚未提交、未定版本号。发布时由项目所有者决定版本号与提交信息。
+
+- **排名型梯度（火堆 / 商店 / 尼奥 / 火堆偏好）**：新增 `tier/RankRule`（分档规则）、`tier/NeowShort`（尼奥概况短名）、
+  `TierListBuilder.buildCampfire/buildShop/buildNeow`、`TierImageExporter.exportText`（无图源条目用像素文字占位图），
+  `Tier` 增加排名档位 RS/RA/RB/RC/RD。统计页 4/14/15/16 出现导出按钮。
+- **火堆**：每幕一张「火堆行动」，同时列出升级目标卡与睡觉 / 回忆 / 删牌 / 挖掘 / 举重；
+  指标 = 次数 ÷ 该幕火堆行动总数。升级目标卡附「抓取 X/Y」上下文（神话次数少通常是没有抓到，不是不升级）。
+- **火堆偏好**：新增统计页与梯度表，把「行动」和「锻造偏好」放在同一批火堆访问上分三层看：
+  - 行动层 = 锻造 / 睡觉 / 回忆 / 抽烟 / 举重 / 挖掘次数 ÷ 火堆访问次数（合计 100%）；
+  - 卡牌层 = 该幕锻造次数 ÷ 到该幕结束累计拥有张数（初始牌组 + 抓取 + 商店 + 事件 + 变牌，扣掉删牌/变牌移出）；
+    四幕合计的分母用整局获得过的副本总数，避免删牌把分母压小；
+  - 桥接层 = 升级次数 ÷ 锻造次数（占锻造）、升级次数 ÷ 火堆访问次数（占火堆），后者与行动占比同分母，可直接比较。
+  页面与梯度按第一至第四幕排列，四幕合计放最后；只统计火堆锻造，已升级的副本不会再次被敲，
+  所以同一张牌第二幕起升级率自然下降；拥有不足 10 张不参与排名。
+- **商店**：每幕「购买商品」（卡 / 遗物 / 药水混排，剔除删牌与汇总行）+ 一张「商店动作（四幕合计）」单列删牌。
+- **尼奥**：一行 = 一个「奖励 + 代价」选项（绝不按奖励合并），按选中次数排名；
+  占比 = 选中次数 ÷ 尼奥选择总次数。简称如「掉血删2」「血上限删2」「诅咒250」「掉钱250」，
+  字符串集中维护在 `tier/NeowShort.java`。
+- **卡图修复**：改用游戏自带 `localization/eng/cards.json` 建「英文卡名 → cardID」索引，
+  修掉中文客户端下 7 张卡永远 `NO IMAGE` 的问题；查不到时打 warn 而不是静默兜底。
+- **分档规则改为 `RankRule.JENKS`（Jenks 自然断点，k=5）**：用 Fisher-Jenks 动态规划切成 5 段，
+  使各档内部平方和之和最小。先按不同数值分组再做 DP，所以**同值必定同档**、每档至少 1 条。
+  实测 32 张表：档内跨度中位 **1.50**（等人数 2.29）、空档 **0** 个（数值四分位 5 个）、
+  80% 重采样档位稳定率 火堆 86.4% / 商店 80.9%。
+  档位为 S/A/B/C/D 五档；指标只有 3~4 个不同取值时底部档留空（例如「行动类型」表）。
+- **导出主标改为「原始次数」**：分档是在次数上切的，所以图片大数字写 `351 次`，
+  副标写 `24.81% · 351/1415`（占比 + 分子/分母）。尼奥的分母统一是「尼奥选择总次数」，
+  不是逐条不同的提供次数——`.run` 里被跳过选项的代价全是 `NONE`，算不出带代价选项的真实选取率。
+  同一张表内「次数」与「占比」是等比缩放，排序与档位完全一致（32 张表 100% 同序）。
+- 其余规则（`QUARTILE` / `CUMULATIVE` / `RELATIVE` / `HYBRID` / `VALUE_QUARTILE`）全部保留，可一行切换。
 
 ### v4.2.2
 - 新增 `scripts/download_monster_images.py`：从灰机 wiki 敌人图鉴下载 46 张原图并生成 64 个遭遇别名；默认裁掉标题、稀有度徽章并做圆角（`--no-crop` 可保留整图）。图源仅限本地非商业使用（CC BY-NC-SA 4.0），不随仓库或 JAR 分发。

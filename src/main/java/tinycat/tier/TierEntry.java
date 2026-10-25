@@ -15,9 +15,16 @@ public class TierEntry {
     public final int picked;
     public final double rate;
     public final Tier tier;
-    /** card / boss_relic / skip */
+    /** card / boss_relic / relic / potion / action / neow / other */
     public final String type;
     public String imagePath;
+    /**
+     * 占位图上要写的 ASCII 文字（只有没有真实图源的条目才用：火堆行动类型、尼奥奖励、药水等）。
+     * 像素字体只支持 ASCII，中文概况请放 nameZh。
+     */
+    public String imageText;
+    /** 补充口径，例如火堆升级目标的「抓取 X/Y」；为空则不显示。 */
+    public String context = "";
 
     public TierEntry(String id,
                      String nameEn,

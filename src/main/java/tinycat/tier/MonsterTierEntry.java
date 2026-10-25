@@ -18,10 +18,12 @@ public final class MonsterTierEntry {
     public final double p90HpLoss;
     public final double ci95Low;
     public final double ci95High;
-    /** 样本不足的条目为 null，不参与 T0-T4 分档。 */
+    /** 样本不足的标记；仅用于展示提示，不再影响分档。 */
+    public final boolean lowSample;
+    /** 分档结果；所有条目都会分档，样本不足的由 lowSample 标注。 */
     public final MonsterTier tier;
     public final int tierRank;
-    /** 非 Boss 条目在该幕的等人数分档排名；Boss 与低样本为 0。 */
+    /** 非 Boss 条目在该幕的等人数分档排名；Boss 为 0。 */
     public final int nonBossRank;
     public String imagePath;
 
@@ -40,7 +42,8 @@ public final class MonsterTierEntry {
                             double ci95High,
                             MonsterTier tier,
                             int tierRank,
-                            int nonBossRank) {
+                            int nonBossRank,
+                            boolean lowSample) {
         this.id = id;
         this.nameEn = nameEn;
         this.nameZh = nameZh;
@@ -57,6 +60,7 @@ public final class MonsterTierEntry {
         this.tier = tier;
         this.tierRank = tierRank;
         this.nonBossRank = nonBossRank;
+        this.lowSample = lowSample;
     }
 
     public boolean isBoss() {

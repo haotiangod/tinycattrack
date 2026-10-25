@@ -17,12 +17,19 @@ public class TierListGroup {
     public final String labelZh;
     public final List<TierEntry> entries;
     public final Map<Tier, List<TierEntry>> tiers;
+    /** 组备注（可空）：火堆偏好用来标注「睡觉」——它不参与竞争榜，但数值同样重要。 */
+    public final String note;
 
     public TierListGroup(String key, String labelEn, String labelZh, List<TierEntry> entries) {
+        this(key, labelEn, labelZh, entries, null);
+    }
+
+    public TierListGroup(String key, String labelEn, String labelZh, List<TierEntry> entries, String note) {
         this.key = key;
         this.labelEn = labelEn;
         this.labelZh = labelZh;
         this.entries = entries;
+        this.note = note;
 
         Map<Tier, List<TierEntry>> map = new LinkedHashMap<>();
         for (Tier tier : Tier.values()) {

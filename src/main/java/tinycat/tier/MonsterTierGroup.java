@@ -9,8 +9,10 @@ public final class MonsterTierGroup {
     public final String labelZh;
     public final List<MonsterTierEntry> bosses;
     public final List<MonsterTierEntry> nonBosses;
-    /** 低于样本门槛的条目；保留展示，但不参与 T0-T4 分档。 */
+    /** 低于样本门槛的条目；0.2.x 之后不再单独成区，恒为空列表，保留字段兼容旧导出。 */
     public final List<MonsterTierEntry> lowSampleEntries;
+    /** 本幕被标记为"样本不足"的条目数量（仍然参与分档）。 */
+    public final int lowSampleFlagged;
     public final int bossSampleTotal;
     public final int nonBossSampleTotal;
     public final int bossNetHpLoss;
@@ -38,6 +40,19 @@ public final class MonsterTierGroup {
         this.bossNetHpLoss = bossNetHpLoss;
         this.nonBossNetHpLoss = nonBossNetHpLoss;
         this.lowSampleCount = lowSampleEntries.size();
+
+        int flagged = 0;
+        for (MonsterTierEntry entry : bosses) {
+            if (entry.lowSample) {
+                flagged++;
+            }
+        }
+        for (MonsterTierEntry entry : nonBosses) {
+            if (entry.lowSample) {
+                flagged++;
+            }
+        }
+        this.lowSampleFlagged = flagged;
     }
 
     public List<MonsterTierEntry> entriesOf(MonsterTier tier) {

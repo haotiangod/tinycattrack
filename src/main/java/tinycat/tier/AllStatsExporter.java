@@ -12,6 +12,8 @@ import tinycat.ui.MoreStatsScreen;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -46,8 +48,6 @@ public final class AllStatsExporter {
     private static final Set<String> SUMMARY_NAMES = new HashSet<String>();
     private static final Set<String> DAMAGE_TOTAL_NAMES = new HashSet<String>();
     private static final Map<String, String> CAMPFIRE_ACTIONS = new HashMap<String, String>();
-    private static final Map<String, String> NEOW_BONUS_ZH = new HashMap<String, String>();
-    private static final Map<String, String> NEOW_COST_ZH = new HashMap<String, String>();
 
     static {
         SUMMARY_NAMES.add("战斗总计");
@@ -71,34 +71,6 @@ public final class AllStatsExporter {
         CAMPFIRE_ACTIONS.put("PURGE", "删牌");
         CAMPFIRE_ACTIONS.put("DIG", "挖掘");
         CAMPFIRE_ACTIONS.put("LIFT", "举重");
-
-        NEOW_BONUS_ZH.put("THREE_CARDS", "从三张卡牌中选择一张。");
-        NEOW_BONUS_ZH.put("RANDOM_COLORLESS", "选择一张无色罕见卡牌获得。");
-        NEOW_BONUS_ZH.put("RANDOM_COMMON_RELIC", "获得一个随机普通遗物。");
-        NEOW_BONUS_ZH.put("REMOVE_CARD", "移除一张卡牌。");
-        NEOW_BONUS_ZH.put("TRANSFORM_CARD", "变化一张卡牌。");
-        NEOW_BONUS_ZH.put("UPGRADE_CARD", "升级一张卡牌。");
-        NEOW_BONUS_ZH.put("THREE_ENEMY_KILL", "前三场战斗中的敌人只有 1 点生命。");
-        NEOW_BONUS_ZH.put("THREE_SMALL_POTIONS", "获得 3 瓶随机药水。");
-        NEOW_BONUS_ZH.put("TEN_PERCENT_HP_BONUS", "获得 10% 最大生命值。");
-        NEOW_BONUS_ZH.put("ONE_RANDOM_RARE_CARD", "获得一张随机稀有卡牌。");
-        NEOW_BONUS_ZH.put("HUNDRED_GOLD", "获得 100 金币。");
-        NEOW_BONUS_ZH.put("TWO_FIFTY_GOLD", "获得 250 金币。");
-        NEOW_BONUS_ZH.put("TWENTY_PERCENT_HP_BONUS", "获得 20% 最大生命值。");
-        NEOW_BONUS_ZH.put("RANDOM_COLORLESS_2", "选择一张稀有无色卡牌获得。");
-        NEOW_BONUS_ZH.put("THREE_RARE_CARDS", "从三张稀有卡牌中选择一张。");
-        NEOW_BONUS_ZH.put("REMOVE_TWO", "移除两张卡牌。");
-        NEOW_BONUS_ZH.put("TRANSFORM_TWO_CARDS", "变化两张卡牌。");
-        NEOW_BONUS_ZH.put("ONE_RARE_RELIC", "获得一个随机稀有遗物。");
-        NEOW_BONUS_ZH.put("BOSS_RELIC", "失去初始遗物，获得一个随机 Boss 遗物。");
-        NEOW_BONUS_ZH.put("RANDOM_COLORLESS_2_ACTUAL", "选择一张稀有无色卡牌获得。");
-
-        NEOW_COST_ZH.put("CURSE", "获得一个诅咒。");
-        NEOW_COST_ZH.put("NO_GOLD", "失去所有金币。");
-        NEOW_COST_ZH.put("TEN_PERCENT_HP_LOSS", "失去 10% 最大生命值。");
-        NEOW_COST_ZH.put("PERCENT_DAMAGE", "受到伤害。");
-        NEOW_COST_ZH.put("TWO_STARTER_CARDS", "增加两张初始卡牌。");
-        NEOW_COST_ZH.put("ONE_STARTER_CARD", "增加一张初始卡牌。");
     }
 
     private AllStatsExporter() {
@@ -121,6 +93,19 @@ public final class AllStatsExporter {
             case BOSS_RELICS:
                 writeBossRelics(model, cs, root);
                 break;
+            case NEOW:
+                // 尼奥页的梯度表已按 (bonus,cost) 逐项导出到 data.csv / data.json；
+                // 不在这里再写一份按奖励合并的选取率工作簿，避免两种口径混在同一个包里。
+                break;
+            case CAMPFIRE:
+                writeCampfire(model, cs, root);
+                break;
+            case SHOP:
+                writeShop(model, cs, root);
+                break;
+            case CAMPFIRE_UPGRADE:
+                writeCampfireUpgrade(model, cs, root);
+                break;
             case ALL:
             default:
                 writeOverview(screen, model, root);
@@ -135,6 +120,7 @@ public final class AllStatsExporter {
                 writeEvents(model, cs, root);
                 writeCampfire(model, cs, root);
                 writeShop(model, cs, root);
+                writeCampfireUpgrade(model, cs, root);
                 break;
         }
     }
@@ -338,186 +324,218 @@ public final class AllStatsExporter {
 
     private static void writeNeow(TierListModel model, ClassStat cs, File root) throws IOException {
         XlsxWriter wb = new XlsxWriter();
-        String context = pageContext(model, "口径：胜率为选择该尼奥奖励的对局胜率；选取率为选取 ÷ 提供");
-        XlsxWriter.Sheet win = newSheet(wb, "尼奥胜率", "尼奥奖励 · 胜率", context,
+        String context = pageContext(model,
+                "口径：一行 = 一个「奖励 + 代价」选项，不同代价算不同选项、不合并。"
+                        + "出现次数 = 该选项被选中 + 被跳过的次数；简单率 = 被选 ÷ 出现。"
+                        + "标准化率 = Bradley-Terry 强度占比：把每局「1 选中 + 3 跳过」拆成 3 场两两对决来估计，"
+                        + "用来剔除「老和强选项同场」造成的低估。"
+                        + "两个区间都是 95%：简单率用 Wilson 区间，标准化率用配对矩阵 bootstrap(100)。"
+                        + "两条 CI 重叠时，名次差不能当成真实差异。");
+        XlsxWriter.Sheet win = newSheet(wb, "尼奥胜率", "尼奥开局选项 · 胜率", context,
                 "排名", "中文名", "英文名", "胜场", "败场", "对局数", "胜率");
         int winCount = writeWinRows(win, cs.neowWinRate, 0, model.minSample);
         if (winCount == 0) {
             noData(win);
         }
 
-        XlsxWriter.Sheet pick = newSheet(wb, "尼奥选取率", "尼奥奖励 · 选取率", context,
-                "排名", "中文名", "英文名", "选取次数", "跳过次数", "提供次数", "选取率");
-        int pickCount = writePickRows(pick, cs.neowPickRate, 0, model.minSample);
-        if (pickCount == 0) {
-            noData(pick);
+        List<NeowRanker.Row> rows = NeowRanker.rank(cs, model.minSample);
+        if (rows.isEmpty()) {
+            XlsxWriter.Sheet empty = newSheet(wb, "简单率", "尼奥开局选项 · 简单率", context,
+                    "排名", "中文名", "英文名", "出现", "被选", "简单率", "95%CI 下", "95%CI 上");
+            noData(empty);
+            wb.write(new File(root, "尼奥奖励.xlsx"));
+            return;
+        }
+
+        // 表一：简单率（按简单率降序）
+        List<NeowRanker.Row> bySimple = new ArrayList<NeowRanker.Row>(rows);
+        Collections.sort(bySimple, new Comparator<NeowRanker.Row>() {
+            @Override
+            public int compare(NeowRanker.Row a, NeowRanker.Row b) {
+                return Double.compare(b.simple, a.simple);
+            }
+        });
+        XlsxWriter.Sheet simple = newSheet(wb, "简单率", "尼奥开局选项 · 简单率（按出现时被选比例）", context,
+                "排名", "中文名", "英文名", "出现", "被选", "简单率", "95%CI 下", "95%CI 上");
+        int rank = 0;
+        for (NeowRanker.Row row : bySimple) {
+            rank++;
+            simple.data(
+                    XlsxWriter.Cell.integer(rank),
+                    XlsxWriter.Cell.text(NeowShort.zh(row.neow.bonus, row.neow.cost)),
+                    XlsxWriter.Cell.text(NeowShort.en(row.neow.bonus, row.neow.cost)),
+                    XlsxWriter.Cell.integer(row.offered),
+                    XlsxWriter.Cell.integer(row.picked),
+                    XlsxWriter.Cell.percent(row.simple / 100.0D),
+                    XlsxWriter.Cell.percent(row.simpleLow / 100.0D),
+                    XlsxWriter.Cell.percent(row.simpleHigh / 100.0D));
+        }
+
+        // 表二：标准化率（按 BT 强度降序），附简单率与名次变动
+        Map<NeowRanker.Row, Integer> simpleRank = new java.util.IdentityHashMap<NeowRanker.Row, Integer>();
+        for (int i = 0; i < bySimple.size(); i++) {
+            simpleRank.put(bySimple.get(i), i + 1);
+        }
+        XlsxWriter.Sheet std = newSheet(wb, "标准化率", "尼奥开局选项 · 标准化率（Bradley-Terry）", context,
+                "排名", "中文名", "英文名", "标准化率", "95%CI 下", "95%CI 上",
+                "简单率", "简单排名", "名次变动", "出现");
+        rank = 0;
+        for (NeowRanker.Row row : rows) {
+            rank++;
+            int sr = simpleRank.containsKey(row) ? simpleRank.get(row) : 0;
+            std.data(
+                    XlsxWriter.Cell.integer(rank),
+                    XlsxWriter.Cell.text(NeowShort.zh(row.neow.bonus, row.neow.cost)),
+                    XlsxWriter.Cell.text(NeowShort.en(row.neow.bonus, row.neow.cost)),
+                    XlsxWriter.Cell.percent(row.standardized / 100.0D),
+                    XlsxWriter.Cell.percent(row.standardizedLow / 100.0D),
+                    XlsxWriter.Cell.percent(row.standardizedHigh / 100.0D),
+                    XlsxWriter.Cell.percent(row.simple / 100.0D),
+                    XlsxWriter.Cell.integer(sr),
+                    XlsxWriter.Cell.integer(sr - rank),
+                    XlsxWriter.Cell.integer(row.offered));
         }
         wb.write(new File(root, "尼奥奖励.xlsx"));
     }
 
-    private static void writeBossRelics(TierListModel model, ClassStat cs, File root) throws IOException {
-        XlsxWriter wb = new XlsxWriter();
-        String context = pageContext(model, "口径：选取率 = 选取 ÷ 提供；胜率按选到该遗物的对局统计；SKIP = 跳过");
-        String[] pickSheets = {"第一幕选取率", "第二幕选取率"};
-        List<List<Rate<BossRelic>>> pickLists = new ArrayList<List<Rate<BossRelic>>>();
-        pickLists.add(cs.bossRelicPickRateAct1);
-        pickLists.add(cs.bossRelicPickRateAct2);
-        for (int i = 0; i < pickSheets.length; i++) {
-            XlsxWriter.Sheet sheet = newSheet(wb, pickSheets[i], "BOSS 遗物 · " + pickSheets[i], context,
-                    "排名", "中文名", "英文名", "选取次数", "跳过次数", "提供次数", "选取率");
-            int count = writePickRows(sheet, pickLists.get(i), 0, model.minSample);
-            if (count == 0) {
-                noData(sheet);
+    /**
+     * 火堆选项权重：分母是该选项<b>真正可选</b>的次数。
+     * 睡觉/升级几乎每次都能选；抽烟/举重/挖掘只在拥有和平烟斗/吉里亚/铲子时可选；
+     * 回忆只在 1-3 幕且尚未回忆时可选，并拆「强制」（要进第四幕必须消耗一个火堆拿红钥匙）。
+     */
+    private static void writeCampfireOptionWeights(XlsxWriter wb, TierListModel model, ClassStat cs,
+                                                   String method) {
+        XlsxWriter.Sheet sheet = newSheet(wb, "火堆选项", "火堆选项权重",
+                pageContext(model, method),
+                "幕", "选项", "被选次数", "可选次数", "权重%", "随机基线%", "倍数", "强制回忆", "非强制回忆");
+        sheet.width(1, 10.0D);
+        sheet.width(4, 12.0D);
+        sheet.width(5, 12.0D);
+        sheet.width(6, 10.0D);
+        int[] acts = {1, 2, 3, 4, 0};
+        for (int i = 0; i < acts.length; i++) {
+            int act = acts[i];
+            String actName = act == 0 ? "四幕合计" : ACT_ZH[act - 1];
+            List<ClassStat.CampfireOption> options = campfireOptionsOf(cs, act);
+            if (options == null) {
+                continue;
+            }
+            for (ClassStat.CampfireOption option : options) {
+                if (option == null) {
+                    continue;
+                }
+                sheet.data(
+                        XlsxWriter.Cell.text(actName),
+                        XlsxWriter.Cell.text(optionZh(option.key)),
+                        XlsxWriter.Cell.integer(option.chosen),
+                        XlsxWriter.Cell.integer(option.available),
+                        XlsxWriter.Cell.percent(ratio(option.chosen, option.available)),
+                        XlsxWriter.Cell.percent(option.baseline / 100.0D),
+                        XlsxWriter.Cell.decimal(option.multiple()),
+                        XlsxWriter.Cell.integer(option.forced),
+                        XlsxWriter.Cell.integer(option.optional));
             }
         }
+    }
 
-        String[] winSheets = {"第一幕胜率", "第二幕胜率", "交换遗物胜率"};
-        List<List<Rate<BossRelic>>> winLists = new ArrayList<List<Rate<BossRelic>>>();
-        winLists.add(cs.bossRelicWinRateAct1);
-        winLists.add(cs.bossRelicWinRateAct2);
-        winLists.add(cs.bossRelicWinRateSwap);
-        for (int i = 0; i < winSheets.length; i++) {
-            String extra = i == 2 ? "交换遗物：Neow 开局交换 Boss 遗物后的对局胜率" : "按选到该 Boss 遗物的对局统计";
-            XlsxWriter.Sheet sheet = newSheet(wb, winSheets[i], "BOSS 遗物 · " + winSheets[i],
-                    pageContext(model, extra),
-                    "排名", "中文名", "英文名", "胜场", "败场", "对局数", "胜率");
-            int count = writeWinRows(sheet, winLists.get(i), 0, model.minSample);
-            if (count == 0) {
-                noData(sheet);
+    private static String optionZh(String key) {
+        if ("SMITH".equals(key)) return "升级";
+        if ("REST".equals(key)) return "睡觉";
+        if ("RECALL".equals(key)) return "回忆";
+        if ("PURGE".equals(key)) return "抽烟";
+        if ("LIFT".equals(key)) return "举重";
+        if ("DIG".equals(key)) return "挖掘";
+        return key;
+    }
+
+    private static List<ClassStat.CampfireOption> campfireOptionsOf(ClassStat cs, int act) {
+        switch (act) {
+            case 1: return cs.campfireOptionsAct1;
+            case 2: return cs.campfireOptionsAct2;
+            case 3: return cs.campfireOptionsAct3;
+            case 4: return cs.campfireOptionsAct4;
+            default: return cs.campfireOptionsTotal;
+        }
+    }
+
+    /**
+     * 火堆构成：行动层与卡牌层共用「火堆访问次数」这同一分母。
+     * 行动占比合计 = 100%（锻造 + 睡觉 + 回忆 + 抽烟 + 举重 + 挖掘）；
+     * 卡牌表中的「占火堆」都落在锻造这一块里。
+     */
+    private static void writeCampfireMix(XlsxWriter wb, TierListModel model, ClassStat cs,
+                                         String method) {
+        XlsxWriter.Sheet sheet = newSheet(wb, "火堆构成", "火堆构成（行动占比）",
+                pageContext(model, method),
+                "幕", "行动", "原始键", "次数", "占该幕火堆", "占四幕合计");
+        sheet.width(4, 14.0D);
+        sheet.width(5, 14.0D);
+        String[] keys = {"SMITH", "REST", "RECALL", "PURGE", "LIFT", "DIG"};
+        String[] labels = {"锻造", "睡觉", "回忆", "抽烟", "举重", "挖掘"};
+        for (int act = 1; act <= 4; act++) {
+            List<Rate<Object>> actions = campfireActionsOf(cs, act);
+            int visits = cs.campfireVisits[act];
+            for (int i = 0; i < keys.length; i++) {
+                int count = "SMITH".equals(keys[i]) ? cs.campfireSmiths[act]
+                        : actionCount(actions, keys[i]);
+                sheet.data(
+                        XlsxWriter.Cell.text(ACT_ZH[act - 1]),
+                        XlsxWriter.Cell.text(labels[i]),
+                        XlsxWriter.Cell.text(keys[i]),
+                        XlsxWriter.Cell.integer(count),
+                        XlsxWriter.Cell.percent(ratio(count, visits)),
+                        XlsxWriter.Cell.percent(ratio(count, cs.campfireVisits[0])));
             }
         }
-        wb.write(new File(root, "BOSS遗物.xlsx"));
+        int visits = cs.campfireVisits[0];
+        for (int i = 0; i < keys.length; i++) {
+            int count = "SMITH".equals(keys[i]) ? cs.campfireSmiths[0]
+                    : actionCount(cs.campfireActionsTotal, keys[i]);
+            sheet.data(
+                    XlsxWriter.Cell.text("四幕合计"),
+                    XlsxWriter.Cell.text(labels[i]),
+                    XlsxWriter.Cell.text(keys[i]),
+                    XlsxWriter.Cell.integer(count),
+                    XlsxWriter.Cell.percent(ratio(count, visits)),
+                    XlsxWriter.Cell.percent(ratio(count, visits)));
+        }
     }
 
-    private static void writeDamage(TierListModel model, ClassStat cs, File root) throws IOException {
-        XlsxWriter wb = new XlsxWriter();
-        String context = pageContext(model,
-                "口径：战损 = 本层结束 HP − 本层开始 HP（负数表示回血）；受到伤害 = 战斗内总伤害。"
-                        + "第 1 层无追踪状态文件时按伤害估算（战士 -6）；已排除宝箱层与 Boss 后奖励层");
-
-        XlsxWriter.Sheet loss = newSheet(wb, "战损", "遭遇战平均战损（实际 HP 变化）", context,
-                "幕", "排名", "名称", "英文名", "平均战损", "样本数", "备注");
-        loss.width(6, 36.0D);
-        int lossCount = writeMeanRows(loss, cs.averageActualHPLoss, model.minSample,
-                "该遭遇的平均实际 HP 变化");
-        if (lossCount == 0) {
-            noData(loss);
+    private static List<Rate<Object>> campfireActionsOf(ClassStat cs, int act) {
+        switch (act) {
+            case 1: return cs.campfireActionsAct1;
+            case 2: return cs.campfireActionsAct2;
+            case 3: return cs.campfireActionsAct3;
+            case 4: return cs.campfireActionsAct4;
+            default: return cs.campfireActionsTotal;
         }
-
-        XlsxWriter.Sheet damage = newSheet(wb, "受到伤害", "遭遇战平均受到伤害（战斗内伤害）", context,
-                "幕", "排名", "名称", "英文名", "平均受到伤害", "样本数", "备注");
-        damage.width(6, 36.0D);
-        int damageCount = writeMeanRows(damage, cs.averageDamageTaken, model.minSample,
-                "战斗内造成的总伤害，不扣除回血");
-        if (damageCount == 0) {
-            noData(damage);
-        }
-
-        XlsxWriter.Sheet split = newSheet(wb, "有无回复", "遭遇战战损分类（无回复 / 有回复）", context,
-                "幕", "排名", "名称", "英文名",
-                "无回复平均战损", "无回复样本", "有回复平均战损", "有回复样本", "备注");
-        split.width(8, 38.0D);
-        int splitCount = writeSplitRows(split, cs.averageNoHealActualHPLoss, cs.averageHealActualHPLoss,
-                model.minSample);
-        if (splitCount == 0) {
-            noData(split);
-        }
-        wb.write(new File(root, "遭遇战伤害.xlsx"));
     }
 
-    private static void writeMortalityAndPotions(TierListModel model, ClassStat cs, File root) throws IOException {
-        XlsxWriter wb = new XlsxWriter();
-        String context = pageContext(model,
-                "口径：死亡率 = 该敌人导致的死亡局数 ÷ 遭遇次数；总遭遇行为该幕汇总；问号节点只统计数量");
-        XlsxWriter.Sheet mortality = newSheet(wb, "死亡率", "遭遇战死亡率", context,
-                "幕", "排名", "名称", "英文名", "死亡次数", "遭遇次数", "死亡率", "备注");
-        mortality.width(7, 38.0D);
-        int count = writeMortalityRows(mortality, cs, model.minSample);
-        if (count == 0) {
-            noData(mortality);
+    private static int actionCount(List<Rate<Object>> actions, String key) {
+        if (actions == null) {
+            return 0;
         }
-
-        XlsxWriter.Sheet potions = newSheet(wb, "药水使用", "遭遇战平均药水使用", context,
-                "幕", "排名", "名称", "英文名", "平均药水使用", "样本数", "备注");
-        potions.width(6, 36.0D);
-        int potionCount = writeMeanRows(potions, cs.averagePotionUse, model.minSample,
-                "该遭遇中平均使用的药水数量");
-        if (potionCount == 0) {
-            noData(potions);
-        }
-        wb.write(new File(root, "遭遇战死亡率与药水.xlsx"));
-    }
-
-    private static void writeRelics(TierListModel model, ClassStat cs, File root) throws IOException {
-        XlsxWriter wb = new XlsxWriter();
-        XlsxWriter.Sheet owned = newSheet(wb, "遗物胜率", "遗物胜率",
-                pageContext(model, "口径：对局结束时卡组/遗物栏拥有该遗物的对局胜率"),
-                "排名", "中文名", "英文名", "胜场", "败场", "对局数", "胜率");
-        int ownedCount = writeWinRows(owned, cs.relicWinRate, 0, model.minSample);
-        if (ownedCount == 0) {
-            noData(owned);
-        }
-
-        XlsxWriter.Sheet purchased = newSheet(wb, "购买遗物胜率", "购买遗物胜率",
-                pageContext(model, "口径：在商店购买过该遗物的对局胜率"),
-                "排名", "中文名", "英文名", "胜场", "败场", "对局数", "胜率");
-        int purchasedCount = writeWinRows(purchased, cs.relicPurchasedWinRate, 0, model.minSample);
-        if (purchasedCount == 0) {
-            noData(purchased);
-        }
-        wb.write(new File(root, "遗物胜率.xlsx"));
-    }
-
-    private static void writeEvents(TierListModel model, ClassStat cs, File root) throws IOException {
-        XlsxWriter wb = new XlsxWriter();
-        List<List<Rate<String>>> lists = new ArrayList<List<Rate<String>>>();
-        lists.add(cs.eventWinRateAct1);
-        lists.add(cs.eventWinRateAct2);
-        lists.add(cs.eventWinRateAct3);
-        for (int act = 1; act <= 3; act++) {
-            String sheetName = ACT_ZH[act - 1];
-            XlsxWriter.Sheet sheet = newSheet(wb, sheetName, ACT_ZH[act - 1] + "事件胜率",
-                    pageContext(model, "口径：事件出现时该对局最终是否通关；问号节点只统计数量"),
-                    "排名", "中文名", "英文名", "胜场", "败场", "遭遇次数", "胜率", "备注");
-            sheet.width(7, 40.0D);
-            int count = writeEventRows(sheet, lists.get(act - 1), cs.questionMarksByAct, act, model.minSample);
-            if (count == 0) {
-                noData(sheet);
+        for (Rate<Object> rate : actions) {
+            if (rate != null && key.equals(rate.what)) {
+                return rate.total();
             }
         }
-        wb.write(new File(root, "各幕事件胜率.xlsx"));
-    }
-
-    private static void writeCampfire(TierListModel model, ClassStat cs, File root) throws IOException {
-        List<List<Rate<Object>>> lists = new ArrayList<List<Rate<Object>>>();
-        lists.add(cs.campfireActionsAct1);
-        lists.add(cs.campfireActionsAct2);
-        lists.add(cs.campfireActionsAct3);
-        lists.add(cs.campfireActionsAct4);
-        writeActionWorkbook(model, root, "火堆行动", lists, 35, true);
-    }
-
-    private static void writeShop(TierListModel model, ClassStat cs, File root) throws IOException {
-        List<List<Rate<Object>>> lists = new ArrayList<List<Rate<Object>>>();
-        lists.add(cs.shopActionsAct1);
-        lists.add(cs.shopActionsAct2);
-        lists.add(cs.shopActionsAct3);
-        lists.add(cs.shopActionsAct4);
-        writeActionWorkbook(model, root, "商店行动", lists, 32, false);
+        return 0;
     }
 
     private static void writeActionWorkbook(TierListModel model, File root, String fileName,
                                             List<List<Rate<Object>>> lists, int limit, boolean campfire) throws IOException {
         XlsxWriter wb = new XlsxWriter();
         String method = campfire
-                ? "口径：次数 = 火堆行动被选择次数；胜率 = 出现该行动的对局通关比例；每幕最多 35 行"
-                : "口径：次数 = 商品购买/商店删牌次数；胜率 = 发生该购买的对局通关比例；每幕最多 32 行";
+                ? "口径：次数 = 火堆行动被选择次数；占比 = 次数 ÷ 该幕火堆行动总数；胜/败 = 出现该行动的对局结局。每幕最多 35 行"
+                : "口径：次数 = 商品购买/商店删牌次数；占比 = 次数 ÷ 该幕购买总次数（商店总数/有效商店数不计入）；胜/败 = 出现该购买的对局结局。每幕最多 32 行";
         for (int act = 1; act <= 4; act++) {
             String sheetName = ACT_ZH[act - 1];
+            int denominator = actionTotal(lists.get(act - 1), campfire);
             XlsxWriter.Sheet sheet = newSheet(wb, sheetName, fileName + " · " + ACT_ZH[act - 1], pageContext(model, method),
-                    "排名", "名称", "原始键/英文名", "次数", "胜场", "败场", "胜率", "备注");
+                    "排名", "名称", "原始键/英文名", "次数", "占比", "胜场", "败场", "备注");
             sheet.width(7, 38.0D);
-            int count = writeActionRows(sheet, lists.get(act - 1), limit, model.minSample, campfire);
+            int count = writeActionRows(sheet, lists.get(act - 1), limit, model.minSample, campfire, denominator);
             if (count == 0) {
                 noData(sheet);
             }
@@ -863,8 +881,36 @@ public final class AllStatsExporter {
         return count;
     }
 
+    private static int actionTotal(List<Rate<Object>> rates, boolean campfire) {
+        if (rates == null) {
+            return 0;
+        }
+        if (campfire) {
+            for (Rate<Object> rate : rates) {
+                if (rate != null && "火堆总数".equals(actionName(rate.what, true))) {
+                    return rate.total();
+                }
+            }
+        }
+        int sum = 0;
+        for (Rate<Object> rate : rates) {
+            if (rate == null) {
+                continue;
+            }
+            String name = actionName(rate.what, campfire);
+            if (campfire && "火堆总数".equals(name)) {
+                continue;
+            }
+            if (!campfire && ("商店总数".equals(name) || "有效商店数".equals(name))) {
+                continue;
+            }
+            sum += rate.total();
+        }
+        return sum;
+    }
+
     private static int writeActionRows(XlsxWriter.Sheet sheet, List<Rate<Object>> rates,
-                                       int limit, int minSample, boolean campfire) {
+                                       int limit, int minSample, boolean campfire, int denominator) {
         if (rates == null) {
             return 0;
         }
@@ -894,21 +940,25 @@ public final class AllStatsExporter {
                         XlsxWriter.Cell.summaryText(display),
                         XlsxWriter.Cell.text(raw),
                         XlsxWriter.Cell.summaryInteger(rate.total()),
+                        XlsxWriter.Cell.text(""),
                         XlsxWriter.Cell.summaryInteger(rate.win),
                         XlsxWriter.Cell.summaryInteger(rate.loss),
-                        XlsxWriter.Cell.summaryPercent(ratio(rate.win, rate.total())),
                         XlsxWriter.Cell.text(note));
             } else {
                 rank++;
+                String rowNote = note;
+                if (campfire) {
+                    rowNote = "该行动出现时的对局胜率；升级目标次数受持有量影响，见梯度图的抓取次数";
+                }
                 sheet.data(
                         XlsxWriter.Cell.integer(rank),
                         XlsxWriter.Cell.text(display),
                         XlsxWriter.Cell.text(raw),
                         XlsxWriter.Cell.integer(rate.total()),
+                        XlsxWriter.Cell.percent(ratio(rate.total(), denominator)),
                         XlsxWriter.Cell.integer(rate.win),
                         XlsxWriter.Cell.integer(rate.loss),
-                        XlsxWriter.Cell.percent(ratio(rate.win, rate.total())),
-                        XlsxWriter.Cell.text(note));
+                        XlsxWriter.Cell.text(rowNote));
             }
         }
         return count;
@@ -1024,18 +1074,7 @@ public final class AllStatsExporter {
     }
 
     private static String neowZh(Neow neow) {
-        String bonus = NEOW_BONUS_ZH.get(neow.bonus);
-        if (bonus == null) {
-            bonus = NameMapper.toChinese(neow.bonus);
-        }
-        if (neow.cost == null || "NONE".equals(neow.cost)) {
-            return bonus;
-        }
-        String cost = NEOW_COST_ZH.get(neow.cost);
-        if (cost == null) {
-            cost = NameMapper.toChinese(neow.cost);
-        }
-        return bonus + cost;
+        return NeowShort.fullZh(neow.bonus, neow.cost);
     }
 
     private static String actionName(Object what, boolean campfire) {
@@ -1132,5 +1171,256 @@ public final class AllStatsExporter {
 
     private static String empty(String value) {
         return value == null ? "" : value;
+    }
+
+
+    private static void writeBossRelics(TierListModel model, ClassStat cs, File root) throws IOException {
+        XlsxWriter wb = new XlsxWriter();
+        String context = pageContext(model, "口径：选取率 = 选取 ÷ 提供；胜率按选到该遗物的对局统计；SKIP = 跳过");
+        String[] pickSheets = {"第一幕选取率", "第二幕选取率"};
+        List<List<Rate<BossRelic>>> pickLists = new ArrayList<List<Rate<BossRelic>>>();
+        pickLists.add(cs.bossRelicPickRateAct1);
+        pickLists.add(cs.bossRelicPickRateAct2);
+        for (int i = 0; i < pickSheets.length; i++) {
+            XlsxWriter.Sheet sheet = newSheet(wb, pickSheets[i], "BOSS 遗物 · " + pickSheets[i], context,
+                    "排名", "中文名", "英文名", "选取次数", "跳过次数", "提供次数", "选取率");
+            int count = writePickRows(sheet, pickLists.get(i), 0, model.minSample);
+            if (count == 0) {
+                noData(sheet);
+            }
+        }
+
+        String[] winSheets = {"第一幕胜率", "第二幕胜率", "交换遗物胜率"};
+        List<List<Rate<BossRelic>>> winLists = new ArrayList<List<Rate<BossRelic>>>();
+        winLists.add(cs.bossRelicWinRateAct1);
+        winLists.add(cs.bossRelicWinRateAct2);
+        winLists.add(cs.bossRelicWinRateSwap);
+        for (int i = 0; i < winSheets.length; i++) {
+            String extra = i == 2 ? "交换遗物：Neow 开局交换 Boss 遗物后的对局胜率" : "按选到该 Boss 遗物的对局统计";
+            XlsxWriter.Sheet sheet = newSheet(wb, winSheets[i], "BOSS 遗物 · " + winSheets[i],
+                    pageContext(model, extra),
+                    "排名", "中文名", "英文名", "胜场", "败场", "对局数", "胜率");
+            int count = writeWinRows(sheet, winLists.get(i), 0, model.minSample);
+            if (count == 0) {
+                noData(sheet);
+            }
+        }
+        wb.write(new File(root, "BOSS遗物.xlsx"));
+    }
+
+    private static void writeDamage(TierListModel model, ClassStat cs, File root) throws IOException {
+        XlsxWriter wb = new XlsxWriter();
+        String context = pageContext(model,
+                "口径：战损 = 本层结束 HP − 本层开始 HP（负数表示回血）；受到伤害 = 战斗内总伤害。"
+                        + "第 1 层无追踪状态文件时按伤害估算（战士 -6）；已排除宝箱层与 Boss 后奖励层");
+
+        XlsxWriter.Sheet loss = newSheet(wb, "战损", "遭遇战平均战损（实际 HP 变化）", context,
+                "幕", "排名", "名称", "英文名", "平均战损", "样本数", "备注");
+        loss.width(6, 36.0D);
+        int lossCount = writeMeanRows(loss, cs.averageActualHPLoss, model.minSample,
+                "该遭遇的平均实际 HP 变化");
+        if (lossCount == 0) {
+            noData(loss);
+        }
+
+        XlsxWriter.Sheet damage = newSheet(wb, "受到伤害", "遭遇战平均受到伤害（战斗内伤害）", context,
+                "幕", "排名", "名称", "英文名", "平均受到伤害", "样本数", "备注");
+        damage.width(6, 36.0D);
+        int damageCount = writeMeanRows(damage, cs.averageDamageTaken, model.minSample,
+                "战斗内造成的总伤害，不扣除回血");
+        if (damageCount == 0) {
+            noData(damage);
+        }
+
+        XlsxWriter.Sheet split = newSheet(wb, "有无回复", "遭遇战战损分类（无回复 / 有回复）", context,
+                "幕", "排名", "名称", "英文名",
+                "无回复平均战损", "无回复样本", "有回复平均战损", "有回复样本", "备注");
+        split.width(8, 38.0D);
+        int splitCount = writeSplitRows(split, cs.averageNoHealActualHPLoss, cs.averageHealActualHPLoss,
+                model.minSample);
+        if (splitCount == 0) {
+            noData(split);
+        }
+        wb.write(new File(root, "遭遇战伤害.xlsx"));
+    }
+
+    private static void writeMortalityAndPotions(TierListModel model, ClassStat cs, File root) throws IOException {
+        XlsxWriter wb = new XlsxWriter();
+        String context = pageContext(model,
+                "口径：死亡率 = 该敌人导致的死亡局数 ÷ 遭遇次数；总遭遇行为该幕汇总；问号节点只统计数量");
+        XlsxWriter.Sheet mortality = newSheet(wb, "死亡率", "遭遇战死亡率", context,
+                "幕", "排名", "名称", "英文名", "死亡次数", "遭遇次数", "死亡率", "备注");
+        mortality.width(7, 38.0D);
+        int count = writeMortalityRows(mortality, cs, model.minSample);
+        if (count == 0) {
+            noData(mortality);
+        }
+
+        XlsxWriter.Sheet potions = newSheet(wb, "药水使用", "遭遇战平均药水使用", context,
+                "幕", "排名", "名称", "英文名", "平均药水使用", "样本数", "备注");
+        potions.width(6, 36.0D);
+        int potionCount = writeMeanRows(potions, cs.averagePotionUse, model.minSample,
+                "该遭遇中平均使用的药水数量");
+        if (potionCount == 0) {
+            noData(potions);
+        }
+        wb.write(new File(root, "遭遇战死亡率与药水.xlsx"));
+    }
+
+    private static void writeRelics(TierListModel model, ClassStat cs, File root) throws IOException {
+        XlsxWriter wb = new XlsxWriter();
+        XlsxWriter.Sheet owned = newSheet(wb, "遗物胜率", "遗物胜率",
+                pageContext(model, "口径：对局结束时卡组/遗物栏拥有该遗物的对局胜率"),
+                "排名", "中文名", "英文名", "胜场", "败场", "对局数", "胜率");
+        int ownedCount = writeWinRows(owned, cs.relicWinRate, 0, model.minSample);
+        if (ownedCount == 0) {
+            noData(owned);
+        }
+
+        XlsxWriter.Sheet purchased = newSheet(wb, "购买遗物胜率", "购买遗物胜率",
+                pageContext(model, "口径：在商店购买过该遗物的对局胜率"),
+                "排名", "中文名", "英文名", "胜场", "败场", "对局数", "胜率");
+        int purchasedCount = writeWinRows(purchased, cs.relicPurchasedWinRate, 0, model.minSample);
+        if (purchasedCount == 0) {
+            noData(purchased);
+        }
+        wb.write(new File(root, "遗物胜率.xlsx"));
+    }
+
+    private static void writeEvents(TierListModel model, ClassStat cs, File root) throws IOException {
+        XlsxWriter wb = new XlsxWriter();
+        List<List<Rate<String>>> lists = new ArrayList<List<Rate<String>>>();
+        lists.add(cs.eventWinRateAct1);
+        lists.add(cs.eventWinRateAct2);
+        lists.add(cs.eventWinRateAct3);
+        for (int act = 1; act <= 3; act++) {
+            String sheetName = ACT_ZH[act - 1];
+            XlsxWriter.Sheet sheet = newSheet(wb, sheetName, ACT_ZH[act - 1] + "事件胜率",
+                    pageContext(model, "口径：事件出现时该对局最终是否通关；问号节点只统计数量"),
+                    "排名", "中文名", "英文名", "胜场", "败场", "遭遇次数", "胜率", "备注");
+            sheet.width(7, 40.0D);
+            int count = writeEventRows(sheet, lists.get(act - 1), cs.questionMarksByAct, act, model.minSample);
+            if (count == 0) {
+                noData(sheet);
+            }
+        }
+        wb.write(new File(root, "各幕事件胜率.xlsx"));
+    }
+
+    private static void writeCampfire(TierListModel model, ClassStat cs, File root) throws IOException {
+        List<List<Rate<Object>>> lists = new ArrayList<List<Rate<Object>>>();
+        lists.add(cs.campfireActionsAct1);
+        lists.add(cs.campfireActionsAct2);
+        lists.add(cs.campfireActionsAct3);
+        lists.add(cs.campfireActionsAct4);
+        writeActionWorkbook(model, root, "火堆行动", lists, 35, true);
+    }
+
+    private static void writeShop(TierListModel model, ClassStat cs, File root) throws IOException {
+        List<List<Rate<Object>>> lists = new ArrayList<List<Rate<Object>>>();
+        lists.add(cs.shopActionsAct1);
+        lists.add(cs.shopActionsAct2);
+        lists.add(cs.shopActionsAct3);
+        lists.add(cs.shopActionsAct4);
+        writeActionWorkbook(model, root, "商店行动", lists, 32, false);
+    }
+    private static void writeCampfireUpgrade(TierListModel model, ClassStat cs, File root) throws IOException {
+        XlsxWriter wb = new XlsxWriter();
+        int minOwned = Math.max(1, model.minSample);
+        List<List<ClassStat.CampfireShare>> lists = new ArrayList<List<ClassStat.CampfireShare>>();
+        lists.add(cs.campfireChoiceDistAct1);
+        lists.add(cs.campfireChoiceDistAct2);
+        lists.add(cs.campfireChoiceDistAct3);
+        lists.add(cs.campfireChoiceDistAct4);
+        lists.add(cs.campfireChoiceDistTotal);
+        String[] sheetNames = {ACT_ZH[0], ACT_ZH[1], ACT_ZH[2], ACT_ZH[3], "四幕合计"};
+        String method = "口径：把「升级」拆回每张可敲的牌，与抽烟/举重/挖掘/回忆同榜竞争，按占比排序。"
+                + "候选 = 该条目出现在候选里的次数；被敲 = 实际选中次数；权重% = 被敲 ÷ 候选。"
+                + "随机基线% = 100 ÷ 该幕平均候选池大小（池子 = 可敲卡种 + 可用遗物行动 + 可用回忆）；倍数 = 权重 ÷ 基线。"
+                + "A升级率% = 该幕锻造次数 ÷ 到该幕结束累计拥过的副本数（替补口径，不受删牌影响）。"
+                + "睡觉单列：约束是血量，不进池子。候选不足 " + minOwned + " 次的条目不参与。";
+        for (int i = 0; i < lists.size(); i++) {
+            int act = i < 4 ? i + 1 : 0;
+            XlsxWriter.Sheet sheet = newSheet(wb, sheetNames[i], "火堆偏好 · " + sheetNames[i],
+                    pageContext(model, method),
+                    "排名", "中文名", "英文名", "候选", "被敲", "权重%", "随机基线%", "倍数", "A升级率%", "备注");
+            sheet.width(9, 52.0D);
+            Map<Card, Rate<Card>> alt = altFor(cs, act);
+            int count = writeUpgradeRows(sheet, lists.get(i), 0, minOwned,
+                    cs.campfireUpgradeBaseline[act], alt, cs);
+            if (count == 0) {
+                noData(sheet);
+            }
+        }
+        // 火堆构成（行动占比）也在这本工作簿里，和梯度图的口径一致
+        writeCampfireMix(wb, model, cs, method);
+        wb.write(new File(root, "火堆偏好.xlsx"));
+    }
+
+    private static int writeUpgradeRows(XlsxWriter.Sheet sheet, List<ClassStat.CampfireShare> rates,
+                                        int limit, int minOwned, double baseline,
+                                        Map<Card, Rate<Card>> alt, ClassStat cs) {
+        if (rates == null) {
+            return 0;
+        }
+        int count = 0;
+        for (ClassStat.CampfireShare share : rates) {
+            if (share == null || share.what == null || share.visits < minOwned) {
+                continue;
+            }
+            if (limit > 0 && count >= limit) {
+                break;
+            }
+            count++;
+            String zh;
+            String en;
+            Rate<Card> altRate = null;
+            Integer miss = null;
+            if (share.card) {
+                Card card = (Card) share.what;
+                zh = rateZh(card);
+                en = rateEn(card);
+                altRate = alt.get(card);
+                miss = cs.campfireUpgradeMissCard == null ? null : cs.campfireUpgradeMissCard.get(card);
+            } else {
+                zh = "[" + optionZh((String) share.what) + "]";
+                en = (String) share.what;
+            }
+            double mult = baseline > 0.0D ? share.percent() / baseline : 0.0D;
+            double altPercent = altRate == null ? 0.0D : altRate.percent();
+            String note = miss == null ? "" : "重建缺失 " + miss + " 次，以 A 列为准";
+            sheet.data(
+                    XlsxWriter.Cell.integer(count),
+                    XlsxWriter.Cell.text(zh),
+                    XlsxWriter.Cell.text(en),
+                    XlsxWriter.Cell.integer(share.visits),
+                    XlsxWriter.Cell.integer(share.chosen),
+                    XlsxWriter.Cell.percent(ratio(share.chosen, share.visits)),
+                    XlsxWriter.Cell.percent(baseline / 100.0D),
+                    XlsxWriter.Cell.decimal(mult),
+                    XlsxWriter.Cell.percent(altPercent / 100.0D),
+                    XlsxWriter.Cell.text(note));
+        }
+        return count;
+    }
+
+    private static Map<Card, Rate<Card>> altFor(ClassStat cs, int act) {
+        List<Rate<Card>> list;
+        switch (act) {
+            case 1: list = cs.campfireUpgradeAltAct1; break;
+            case 2: list = cs.campfireUpgradeAltAct2; break;
+            case 3: list = cs.campfireUpgradeAltAct3; break;
+            case 4: list = cs.campfireUpgradeAltAct4; break;
+            default: list = cs.campfireUpgradeAltTotal; break;
+        }
+        Map<Card, Rate<Card>> map = new java.util.HashMap<Card, Rate<Card>>();
+        if (list != null) {
+            for (Rate<Card> rate : list) {
+                if (rate != null && rate.what != null) {
+                    map.put(rate.what, rate);
+                }
+            }
+        }
+        return map;
     }
 }

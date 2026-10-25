@@ -23,7 +23,7 @@ import java.util.List;
  * 只依赖 JDK 自带的 Java2D / ImageIO，不访问网络。
  */
 public final class MonsterTierImageRenderer {
-    private static final int WIDTH = 1600;
+    static final int WIDTH = 1600;
     private static final int PAD = 40;
     private static final int LABEL_W = 170;
     private static final int COLS = 5;
@@ -44,38 +44,53 @@ public final class MonsterTierImageRenderer {
     }
 
     public static void write(MonsterTierModel model, File root) throws Exception {
-        BufferedImage image = render(model, root);
+        BufferedImage image = render(model, root, model.groups);
         ImageIO.write(image, "png", new File(root, "monster-tiers.png"));
         writeJpeg(image, new File(root, "monster-tiers.jpg"), 0.92F);
     }
 
-    private static BufferedImage render(MonsterTierModel model, File root) {
-        int height = layoutHeight(model);
+    /** 渲染指定分组；供「一图完整」与「按幕分图」复用。 */
+    static BufferedImage render(MonsterTierModel model, File root, List<MonsterTierGroup> groups) {
+        int height = layoutHeight(groups);
         BufferedImage image = new BufferedImage(WIDTH, height, BufferedImage.TYPE_INT_RGB);
         Graphics2D g = image.createGraphics();
         try {
-            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-            g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
-            g.setColor(BG);
-            g.fillRect(0, 0, WIDTH, height);
-
-            int y = drawHeader(g, model, PAD);
-            for (MonsterTierGroup group : model.groups) {
-                y = drawGroup(g, group, root, y);
-            }
-            g.setColor(MUTED);
-            g.setFont(font(12, Font.PLAIN));
-            g.drawString("TinyCat · local run history export · no external image source", PAD, height - 24);
+            drawSection(g, model, root, groups, height);
         } finally {
             g.dispose();
         }
         return image;
     }
 
-    private static int layoutHeight(MonsterTierModel model) {
+    /** 单段高度（不含其它段落），供整图拼接预算画布。 */
+    static int sectionHeight(List<MonsterTierGroup> groups) {
+        return layoutHeight(groups);
+    }
+
+    /** 把一段内容画进现成的画布；背景自己铺，供多段拼接。 */
+    static void drawSection(Graphics2D g,
+                            MonsterTierModel model,
+                            File root,
+                            List<MonsterTierGroup> groups,
+                            int height) {
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+        g.setColor(BG);
+        g.fillRect(0, 0, WIDTH, height);
+
+        int y = drawHeader(g, model, PAD);
+        for (MonsterTierGroup group : groups) {
+            y = drawGroup(g, group, root, y);
+        }
+        g.setColor(MUTED);
+        g.setFont(font(12, Font.PLAIN));
+        g.drawString("TinyCat · local run history export · no external image source", PAD, height - 24);
+    }
+
+    private static int layoutHeight(List<MonsterTierGroup> groups) {
         int height = PAD + HEADER_H;
-        for (MonsterTierGroup group : model.groups) {
+        for (MonsterTierGroup group : groups) {
             if (group.isEmpty()) {
                 height += 86;
                 continue;
@@ -124,7 +139,7 @@ public final class MonsterTierImageRenderer {
 
         y += 22;
         g.drawString("生成 / Generated: " + model.generatedAt
-                + "    低样本 / Low sample: " + model.lowSampleCount + " 项（保留，不参与分档）", PAD, y);
+                + "    样本不足 / Low sample: " + model.lowSampleCount + " 项（仍参与分档，条目右下角标注）", PAD, y);
 
         y += 18;
         g.setFont(font(12, Font.PLAIN));
@@ -278,18 +293,29 @@ public final class MonsterTierImageRenderer {
         g.drawString(fit(g, "样本 " + fmtShare(entry.sampleShare) + "% · 净 " + entry.totalHpLoss
                 + " · 贡献 " + fmtShare(entry.lossShare) + "%", textW, Font.PLAIN, 9), textX, y + 98);
         String detail = entry.typeZh() + " / " + entry.typeEn()
-                + (entry.isRanked()
-                ? (entry.isBoss() ? "  Boss #" + entry.tierRank : "  总#" + entry.nonBossRank)
-                : "  样本不足");
+                + (entry.isBoss() ? "  Boss #" + entry.tierRank : "  总#" + entry.nonBossRank)
+                + (entry.lowSample ? "  · 样本不足" : "");
         g.drawString(fit(g, detail, textW, Font.PLAIN, 9), textX, y + 112);
 
         g.setColor(tierColor);
         g.setFont(font(10, Font.BOLD));
-        String rank = !entry.isRanked()
-                ? "n=" + entry.sampleCount
-                : entry.isBoss() ? "BOSS #" + entry.tierRank : "#" + entry.nonBossRank;
+        String rank = entry.isBoss() ? "BOSS #" + entry.tierRank : "#" + entry.nonBossRank;
         int rankWidth = g.getFontMetrics().stringWidth(rank);
         g.drawString(rank, x + ENTRY_W - rankWidth - 9, y + 16);
+
+        // 样本不足标记：右下角小徽章（不参与排序，只做提示）
+        if (entry.lowSample) {
+            g.setFont(font(9, Font.BOLD));
+            String badge = "样本不足 n=" + entry.sampleCount;
+            int bw = g.getFontMetrics().stringWidth(badge) + 12;
+            int bh = 16;
+            int bx = x + ENTRY_W - bw - 6;
+            int by = y + ENTRY_H - bh - 6;
+            g.setColor(new Color(0x2a2314));
+            g.fillRoundRect(bx, by, bw, bh, 6, 6);
+            g.setColor(GOLD);
+            g.drawString(badge, bx + 6, by + 12);
+        }
     }
 
     private static void drawFitted(Graphics2D g, BufferedImage image, int x, int y, int boxW, int boxH) {

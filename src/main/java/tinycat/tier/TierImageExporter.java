@@ -1,5 +1,6 @@
 package tinycat.tier;
 
+import tinycat.Utils;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.Color;
@@ -12,6 +13,8 @@ import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.g2d.TextureAtlas;
 import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.math.Matrix4;
+import com.badlogic.gdx.utils.JsonReader;
+import com.badlogic.gdx.utils.JsonValue;
 import com.badlogic.gdx.utils.ScreenUtils;
 import com.megacrit.cardcrawl.cards.AbstractCard;
 import com.megacrit.cardcrawl.helpers.CardLibrary;
@@ -24,9 +27,12 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 从游戏内存导出卡图/遗物图。
@@ -51,8 +57,11 @@ public class TierImageExporter {
     private final File imagesDir;
     private final File cardsDir;
     private final File relicsDir;
+    private final File potionsDir;
+    private final File textsDir;
     private final File cardsCacheDir;
     private final File relicsCacheDir;
+    private final File potionsCacheDir;
     private final File commonCacheDir;
     private final Map<Texture, Pixmap> pageCache = new IdentityHashMap<Texture, Pixmap>();
 
@@ -70,13 +79,19 @@ public class TierImageExporter {
         this.imagesDir = imagesDir;
         this.cardsDir = new File(imagesDir, "cards");
         this.relicsDir = new File(imagesDir, "relics");
+        this.potionsDir = new File(imagesDir, "potions");
+        this.textsDir = new File(imagesDir, "text");
         this.cardsCacheDir = new File(cacheDir, "cards");
         this.relicsCacheDir = new File(cacheDir, "relics");
+        this.potionsCacheDir = new File(cacheDir, "potions");
         this.commonCacheDir = new File(cacheDir, "common");
         this.cardsDir.mkdirs();
         this.relicsDir.mkdirs();
+        this.potionsDir.mkdirs();
+        this.textsDir.mkdirs();
         this.cardsCacheDir.mkdirs();
         this.relicsCacheDir.mkdirs();
+        this.potionsCacheDir.mkdirs();
         this.commonCacheDir.mkdirs();
 
         File skip = new File(commonCacheDir, "skip.png");
@@ -99,8 +114,88 @@ public class TierImageExporter {
         if ("card".equals(entry.type)) {
             return exportCard(entry);
         }
-        if ("boss_relic".equals(entry.type)) {
+        if ("boss_relic".equals(entry.type) || "relic".equals(entry.type)) {
             return exportRelic(entry);
+        }
+        if ("potion".equals(entry.type)) {
+            return exportPotion(entry);
+        }
+        // 火堆行动类型 / 尼奥奖励 / 药水 / 其它：游戏里拿不到独立图源，用本地像素文字占位图
+        return exportText(entry);
+    }
+
+    /**
+     * 判断商店条目到底是卡牌、遗物还是药水。
+     *
+     * .run 的 items_purchased 只存名字，不分类，所以按「卡 → 遗物 → 药水」的顺序试查。
+     * 查不到的统一当 other（用文字占位图兜底）。
+     */
+    static String classifyShopItem(String name) {
+        if (name == null || name.isEmpty()) {
+            return "other";
+        }
+        // 药水优先：卡牌与遗物查不到时都有「兜底返回」，会把药水误判成头环遗物。
+        try {
+            if (com.megacrit.cardcrawl.helpers.PotionHelper.isAPotion(name)) {
+                return "potion";
+            }
+        } catch (Throwable ignored) {
+            // 查不到就当不是药水
+        }
+        // ID 形式的药水（SwiftPotion）PotionHelper 有时认不出，按后缀兜底
+        if (name.endsWith("Potion")) {
+            return "potion";
+        }
+        try {
+            if (resolveCard(name) != null) {
+                return "card";
+            }
+        } catch (Throwable ignored) {
+            // 游戏未初始化完就跳过
+        }
+        try {
+            com.megacrit.cardcrawl.relics.AbstractRelic relic =
+                    com.megacrit.cardcrawl.helpers.RelicLibrary.getRelic(name);
+            // RelicLibrary 对未知 key 返回 Circlet（头环）而不是 null，必须排除这个兜底
+            if (relic != null && !"Circlet".equals(relic.relicId)) {
+                return "relic";
+            }
+        } catch (Throwable ignored) {
+            // 查不到就当不是遗物
+        }
+        return "other";
+    }
+
+    /** 占位图上写的 ASCII 文字（像素字体只有 ASCII，中文名放 nameZh）。 */
+    static String shopImageText(String name, String type) {
+        if ("potion".equals(type)) {
+            return "POTION";
+        }
+        if ("other".equals(type)) {
+            return "ITEM";
+        }
+        return null;
+    }
+
+    /**
+     * 文字占位图：把 imageText 画到 220x190 的本地 Pixmap 上。
+     * 用于火堆行动类型（REST / RECALL…）、尼奥奖励（RM2+DMG…）、药水等没有独立图源的条目。
+     */
+    private String exportText(TierEntry entry) {
+        String text = entry.imageText == null || entry.imageText.isEmpty() ? "?" : entry.imageText;
+        text = text.toUpperCase(Locale.US);
+        int scale = text.length() <= 6 ? 6 : (text.length() <= 10 ? 4 : 3);
+        String key = cacheKey("text_" + text);
+        File cacheFile = new File(commonCacheDir, key + ".png");
+        if (!isUsable(cacheFile)) {
+            writePlaceholder(cacheFile, text, scale, 220, 190);
+        }
+        if (!isUsable(cacheFile)) {
+            return exportCommon("placeholder.png", PLACEHOLDER_PATH);
+        }
+        File packageFile = new File(textsDir, key + ".png");
+        if (copyFile(cacheFile, packageFile)) {
+            return "images/text/" + key + ".png";
         }
         return exportCommon("placeholder.png", PLACEHOLDER_PATH);
     }
@@ -120,6 +215,41 @@ public class TierImageExporter {
         return exportCommon("placeholder.png", PLACEHOLDER_PATH);
     }
 
+    private String exportPotion(TierEntry entry) {
+        String key = cacheKey("potion_" + entry.id);
+        File cacheFile = new File(potionsCacheDir, key + ".png");
+        File packageFile = new File(potionsDir, key + ".png");
+        if (!isUsable(cacheFile)) {
+            if (!extractPotion(entry, cacheFile)) {
+                return exportCommon("placeholder.png", PLACEHOLDER_PATH);
+            }
+        }
+        if (copyFile(cacheFile, packageFile)) {
+            return "images/potions/" + key + ".png";
+        }
+        return exportCommon("placeholder.png", PLACEHOLDER_PATH);
+    }
+
+    private boolean extractPotion(TierEntry entry, File file) {
+        try {
+            com.megacrit.cardcrawl.potions.AbstractPotion potion =
+                    com.megacrit.cardcrawl.helpers.PotionHelper.getPotion(entry.id);
+            if (potion == null) {
+                return false;
+            }
+            // img 不是 public 字段，走反射（和项目其它游戏 API 访问方式一致）
+            Texture texture = Utils.getField(potion,
+                    com.megacrit.cardcrawl.potions.AbstractPotion.class, "img");
+            if (texture == null) {
+                return false;
+            }
+            return writeTexture(texture, file);
+        } catch (Exception t) {
+            tinycat.logger.warn("TierList: failed to export potion image for " + entry.id, t);
+            return false;
+        }
+    }
+
     private String exportRelic(TierEntry entry) {
         String key = cacheKey("relic_" + entry.id);
         File cacheFile = new File(relicsCacheDir, key + ".png");
@@ -137,8 +267,11 @@ public class TierImageExporter {
 
     private boolean extractCard(TierEntry entry, File file) {
         try {
-            AbstractCard card = CardLibrary.getCard(entry.id);
+            AbstractCard card = resolveCard(entry.id);
             if (card == null || card.portrait == null) {
+                // 之前这里是静默 return，导致 4.2.2 的修复失败后查不到原因
+                tinycat.logger.warn("TierList: card image not found in CardLibrary, id=" + entry.id
+                        + " (nameEn=" + entry.nameEn + ")");
                 return false;
             }
             return writeRegion(card.portrait, file);
@@ -146,6 +279,182 @@ public class TierImageExporter {
             tinycat.logger.warn("TierList: failed to export card image for " + entry.id, t);
             return false;
         }
+    }
+
+    /**
+     * 按名字/ID 取 Card 实例。
+     *
+     * 不能直接用 CardLibrary.getCard(name)：卡牌 ID 与显示名并不总是一致，
+     * 官方重命名过一批卡（ID 仍是旧名），例如
+     *   Gash → Claw、Undo → Equilibrium、Redo → Recursion、Lockon → Bullseye、
+     *   Steam → Steam Barrier、Steam Power → Overclock、Conserve Battery → Charge Battery。
+     * 更糟的是 TinyCat 自己的 CardNameNormalizer 会把 .run 里的旧 cardID 换成新显示名，
+     * 于是 entry.id 变成 "Equilibrium"，而 CardLibrary 的键仍是 "Undo"，直接查必然是 null。
+     *
+     * 4.2.2 试过「遍历 CardLibrary.cards，用 card.name 建索引」，但**在中文客户端下失败**：
+     * AbstractCard.name / originalName 取的是当前语言包，中文下是"均衡"，索引里根本没有英文键；
+     * 加上 normalizeKey 会剥掉非 ASCII 字符，中文名归一后是空串直接被丢弃，
+     * 所以按名字建索引在中文环境里永远匹配不上 —— 这就是上一版没修好的真正原因。
+     *
+     * 现在的查找顺序（与客户端语言无关）：
+     *   1) 直接按 ID 查（86 张正常卡走这条）；
+     *   2) 英文卡名索引：从游戏自带 localization/eng/cards.json 建「英文名 → cardID」，
+     *      该文件 key 是 cardID、NAME 是英文名，不受当前语言影响；
+     *   3) 资源读不到时，用 LEGACY_CARD_IDS 兜底（已对 desktop-1.0.jar 的 eng/cards.json 逐条校验）；
+     *   4) 以上都落空时再用当前语言的 name / originalName / cardID 索引。
+     */
+    static AbstractCard resolveCard(String id) {
+        if (id == null || id.isEmpty()) {
+            return null;
+        }
+        AbstractCard direct = CardLibrary.getCard(id);
+        if (direct != null && direct.portrait != null) {
+            return direct;
+        }
+        AbstractCard indexed = cardNameIndex().get(normalizeKey(id));
+        if (indexed != null && indexed.portrait != null) {
+            return indexed;
+        }
+        String legacyId = LEGACY_CARD_IDS.get(normalizeKey(id));
+        if (legacyId != null) {
+            AbstractCard legacy = CardLibrary.getCard(legacyId);
+            if (legacy != null && legacy.portrait != null) {
+                return legacy;
+            }
+        }
+        return direct;
+    }
+
+    /**
+     * 英文显示名 → 旧 cardID 的兜底表。
+     * 每一条都用 desktop-1.0.jar 里的 localization/eng/cards.json 校验过
+     * （该文件的 key 就是 CardLibrary 的键）。注意大小写与空格：
+     * ClearTheMind / PathToVictory / "Wraith Form v2" / Fasting2 都是真实 ID。
+     */
+    private static final Map<String, String> LEGACY_CARD_IDS;
+
+    static {
+        Map<String, String> map = new HashMap<String, String>();
+        map.put(normalizeKey("Claw"), "Gash");
+        map.put(normalizeKey("Equilibrium"), "Undo");
+        map.put(normalizeKey("Recursion"), "Redo");
+        map.put(normalizeKey("Bullseye"), "Lockon");
+        map.put(normalizeKey("Steam Barrier"), "Steam");
+        map.put(normalizeKey("Overclock"), "Steam Power");
+        map.put(normalizeKey("Charge Battery"), "Conserve Battery");
+        map.put(normalizeKey("Alchemize"), "Venomology");
+        map.put(normalizeKey("Nightmare"), "Night Terror");
+        map.put(normalizeKey("Crippling Cloud"), "Crippling Poison");
+        map.put(normalizeKey("Sneaky Strike"), "Underhanded Strike");
+        map.put(normalizeKey("Tranquility"), "ClearTheMind");
+        map.put(normalizeKey("Foresight"), "Wireheading");
+        map.put(normalizeKey("Simmering Fury"), "Vengeance");
+        map.put(normalizeKey("Rushdown"), "Adaptation");
+        map.put(normalizeKey("Pressure Points"), "PathToVictory");
+        map.put(normalizeKey("Apparition"), "Ghostly");
+        map.put(normalizeKey("Wraith Form"), "Wraith Form v2");
+        map.put(normalizeKey("Fasting"), "Fasting2");
+        LEGACY_CARD_IDS = map;
+    }
+
+    private static Map<String, AbstractCard> cardNameIndex;
+
+    private static Map<String, AbstractCard> cardNameIndex() {
+        if (cardNameIndex == null) {
+            cardNameIndex = buildCardNameIndex();
+        }
+        return cardNameIndex;
+    }
+
+    private static Map<String, AbstractCard> buildCardNameIndex() {
+        Map<String, AbstractCard> index = new HashMap<String, AbstractCard>();
+        Set<String> ambiguous = new HashSet<String>();
+        if (CardLibrary.cards != null) {
+            for (AbstractCard card : CardLibrary.cards.values()) {
+                if (card == null) {
+                    continue;
+                }
+                putCard(index, ambiguous, card.cardID, card);
+                putCard(index, ambiguous, card.name, card);
+                putCard(index, ambiguous, card.originalName, card);
+            }
+        }
+        putEnglishNames(index, ambiguous);
+        return index;
+    }
+
+    /**
+     * 补一层「英文卡名 → 卡牌」索引。
+     *
+     * 游戏把语言包放在 desktop-1.0.jar 内（localization/&lt;lang&gt;/cards.json），
+     * 用 Gdx.files.internal 读就行，和游戏自己加载语言包是同一个路径，
+     * 既不联网也不依赖外部文件，也不需要新依赖（JsonReader 是 libGDX 自带）。
+     */
+    private static void putEnglishNames(Map<String, AbstractCard> index, Set<String> ambiguous) {
+        try {
+            FileHandle file = Gdx.files.internal("localization/eng/cards.json");
+            if (file == null || !file.exists()) {
+                tinycat.logger.warn("TierList: localization/eng/cards.json unavailable, "
+                        + "card name index falls back to current language");
+                return;
+            }
+            JsonValue root = new JsonReader().parse(file);
+            int added = 0;
+            for (JsonValue child = root.child; child != null; child = child.next()) {
+                String cardId = child.name;
+                JsonValue nameValue = child.get("NAME");
+                if (cardId == null || cardId.isEmpty() || nameValue == null) {
+                    continue;
+                }
+                AbstractCard card = CardLibrary.getCard(cardId);
+                if (card == null || card.portrait == null) {
+                    continue;
+                }
+                if (putCard(index, ambiguous, nameValue.asString(), card)) {
+                    added++;
+                }
+            }
+            tinycat.logger.info("TierList: indexed " + added + " english card names");
+        } catch (Exception t) {
+            tinycat.logger.warn("TierList: failed to read localization/eng/cards.json", t);
+        }
+    }
+
+    private static boolean putCard(Map<String, AbstractCard> index,
+                                   Set<String> ambiguous,
+                                   String key,
+                                   AbstractCard card) {
+        String normalized = normalizeKey(key);
+        if (normalized.isEmpty() || ambiguous.contains(normalized)) {
+            return false;
+        }
+        AbstractCard existing = index.get(normalized);
+        if (existing == null) {
+            index.put(normalized, card);
+            return true;
+        }
+        if (existing != card) {
+            // 同名不同卡（各色的 "Strike"、中文的"打击"等）：宁可查不到也不给错图
+            index.remove(normalized);
+            ambiguous.add(normalized);
+        }
+        return false;
+    }
+
+    /** 名称归一：小写、只保留 ASCII 字母数字（"Steam Barrier" 与 "SteamBarrier" 等价）。 */
+    private static String normalizeKey(String value) {
+        if (value == null) {
+            return "";
+        }
+        StringBuilder out = new StringBuilder(value.length());
+        String lower = value.toLowerCase(Locale.US);
+        for (int i = 0; i < lower.length(); i++) {
+            char c = lower.charAt(i);
+            if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+                out.append(c);
+            }
+        }
+        return out.toString();
     }
 
     private boolean extractRelic(TierEntry entry, File file) {

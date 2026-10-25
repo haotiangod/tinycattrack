@@ -1,11 +1,17 @@
 package tinycat.stats;
 
 import com.megacrit.cardcrawl.characters.AbstractPlayer;
+import com.megacrit.cardcrawl.helpers.CardLibrary;
 import com.megacrit.cardcrawl.screens.stats.BossRelicChoiceStats;
+import com.megacrit.cardcrawl.screens.stats.CampfireChoice;
+import com.megacrit.cardcrawl.screens.stats.CardChoiceStats;
+import com.megacrit.cardcrawl.screens.stats.EventStats;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -54,6 +60,11 @@ public class ClassStat {
     public List<Rate<Card>> cardWinRate;
     public List<Rate<Neow>> neowWinRate;
     public List<Rate<Neow>> neowPickRate;
+    /**
+     * 尼奥选项的两两对决矩阵：`neowBeats[A].get(B)` = A 和 B 同场且 A 被选中的次数。
+     * 每局是「1 选中 + 3 跳过」，等价于 3 场 A 对 B 的对决，用于 Bradley-Terry 标准化。
+     */
+    public final Map<Neow, Map<Neow, Integer>> neowBeats = new HashMap<>();
     public List<Rate<BossRelic>> bossRelicPickRateAct1;
     public List<Rate<BossRelic>> bossRelicPickRateAct2;
     public List<Rate<BossRelic>> bossRelicWinRateAct1;
@@ -97,6 +108,132 @@ public class ClassStat {
     public List<Rate<Object>> campfireActionsAct2 = new ArrayList<>();  // 第二幕
     public List<Rate<Object>> campfireActionsAct3 = new ArrayList<>();  // 第三幕
     public List<Rate<Object>> campfireActionsAct4 = new ArrayList<>();  // 第四幕
+
+    // 火堆统一分母：index 0 = 四幕合计，1..4 = 各幕。
+    // campfireVisits 是火堆访问次数（每次选择一个行动），campfireSmiths 是其中选升级的次数。
+    public int[] campfireVisits = new int[5];
+    public int[] campfireSmiths = new int[5];
+
+    // 火堆选项权重：被选次数 ÷ 该选项真正出现的火堆次数。
+    // 回忆只在 1-3 幕且尚未回忆时可选；抽烟/举重/挖掘需要对应遗物；
+    // 睡觉总能选；升级要求卡组里还有可升级的未升级卡。
+    public List<CampfireOption> campfireOptionsTotal = new ArrayList<>();
+    public List<CampfireOption> campfireOptionsAct1 = new ArrayList<>();
+    public List<CampfireOption> campfireOptionsAct2 = new ArrayList<>();
+    public List<CampfireOption> campfireOptionsAct3 = new ArrayList<>();
+    public List<CampfireOption> campfireOptionsAct4 = new ArrayList<>();
+    /** 每次火堆的平均可选项数，以及「随机选一个」时每个选项的期望占比（100 / 平均可选项数）。 */
+    public double[] campfireAvgOptions = new double[5];
+    public double[] campfireOptionBaseline = new double[5];
+    /** 回忆拆成「到达第四幕的对局（必须消耗一个火堆拿红钥匙）」与其余对局。 */
+    public int[] campfireRecallForced = new int[5];
+    public int[] campfireRecallOptional = new int[5];
+
+    // 火堆升级权重（卡牌层）：win = 该卡被敲的次数，loss = 可选但没被敲的次数，total = 可选次数。
+    // 每次锻造的分母是「当时卡组里还有未升级副本的卡牌种类数」，同名多张只算一个选项；
+    // 全部副本已升级的卡会退出分母。四幕合计 = 各幕决策逐次累加。
+    public List<Rate<Card>> campfireUpgradePrefTotal = new ArrayList<>();
+    public List<Rate<Card>> campfireUpgradePrefAct1 = new ArrayList<>();
+    public List<Rate<Card>> campfireUpgradePrefAct2 = new ArrayList<>();
+    public List<Rate<Card>> campfireUpgradePrefAct3 = new ArrayList<>();
+    public List<Rate<Card>> campfireUpgradePrefAct4 = new ArrayList<>();
+    public int[] campfireSmithUsable = new int[5];
+    public double[] campfireUpgradeAvgOptions = new double[5];
+    public double[] campfireUpgradeBaseline = new double[5];
+
+    // A 口径（替补）：该幕锻造次数 ÷ 到该幕结束累计拥过的副本数（不扣后续移出）。
+    // W 需要「当时卡组」，星盘/空鸟笼删了哪张没有日志；这类对局的 W 靠终局补差还原，
+    // 一旦某次锻造的目标仍找不到，就以这一列为准 —— 它只依赖获得次数，不受删牌影响。
+    public List<Rate<Card>> campfireUpgradeAltTotal = new ArrayList<>();
+    public List<Rate<Card>> campfireUpgradeAltAct1 = new ArrayList<>();
+    public List<Rate<Card>> campfireUpgradeAltAct2 = new ArrayList<>();
+    public List<Rate<Card>> campfireUpgradeAltAct3 = new ArrayList<>();
+    public List<Rate<Card>> campfireUpgradeAltAct4 = new ArrayList<>();
+    /** 重建覆盖：能定位到目标且当时未升级的锻造次数 / 失败次数（缺失或已是升级态）。 */
+    public int[] campfireRebuildOk = new int[5];
+    public int[] campfireRebuildMiss = new int[5];
+    /** 受变化类遗物影响的对局数：星盘删 3 张、空鸟笼删 2 张都没有逐张日志。 */
+    public int campfireAstrolabeRuns = 0;
+    public int campfireEmptyCageRuns = 0;
+    /** 重建失败的锻造按卡统计，界面在该卡后面标 *，提示以 A 口列为准。 */
+    public Map<Card, Integer> campfireUpgradeMissCard = new HashMap<>();
+
+    /**
+     * 火堆决策分布：一次火堆的机会到底给了谁。
+     *
+     * 分母统一为「该幕火堆访问次数」，条目 = 每张被敲的卡 + 抽烟/举重/挖掘 + 非强制回忆。
+     * 因为「敲某张卡」就是「选升级」的具体落点，所以各卡的占比之和正好等于升级在选项层的占比
+     * （实测 664/710 = 93.5% = 升级占比），不会出现各层相加超过 100% 的重复计数。
+     * 睡觉不入此表：它的约束是血量，与其他「花掉一次升级机会」的选项不是同一类制约。
+     */
+    public List<CampfireShare> campfireChoiceDistTotal = new ArrayList<>();
+    public List<CampfireShare> campfireChoiceDistAct1 = new ArrayList<>();
+    public List<CampfireShare> campfireChoiceDistAct2 = new ArrayList<>();
+    public List<CampfireShare> campfireChoiceDistAct3 = new ArrayList<>();
+    public List<CampfireShare> campfireChoiceDistAct4 = new ArrayList<>();
+
+    /**
+     * 火堆统一榜的一行：what 为 Card 或行动 key，占比 = chosen ÷ visits。
+     *
+     * 「升级」不出现在这里 —— 它被拆成每张可敲的牌各自一行，和抽烟/举重/挖掘/回忆同台竞争；
+     * 睡觉也不在这里（约束是血量，单独统计）。
+     */
+    public static final class CampfireShare implements SampleSize {
+        public final Object what;
+        public final int chosen;
+        public final int visits;
+        public final boolean card;
+
+        CampfireShare(Object what, int chosen, int visits, boolean card) {
+            this.what = what;
+            this.chosen = chosen;
+            this.visits = visits;
+            this.card = card;
+        }
+
+        public double percent() {
+            return visits <= 0 ? 0.0D : 100.0D * chosen / visits;
+        }
+
+        @Override
+        public int getSampleSize() {
+            return visits;
+        }
+    }
+
+    /** 一次火堆决策里某个选项的可选/被选次数。 */
+    public static final class CampfireOption implements SampleSize {
+        public final String key;
+        public final int chosen;
+        public final int available;
+        /** 在这些「该选项可选」的火堆里，若随机挑一个选项，该选项的期望占比（%）。 */
+        public final double baseline;
+        /** 仅回忆使用：强制（该局到达第四幕）与非强制次数。 */
+        public final int forced;
+        public final int optional;
+
+        CampfireOption(String key, int chosen, int available, double baseline, int forced, int optional) {
+            this.key = key;
+            this.chosen = chosen;
+            this.available = available;
+            this.baseline = baseline;
+            this.forced = forced;
+            this.optional = optional;
+        }
+
+        public double percent() {
+            return available <= 0 ? 0.0D : 100.0D * chosen / available;
+        }
+
+        public double multiple() {
+            return baseline <= 0.0D ? 0.0D : percent() / baseline;
+        }
+
+        @Override
+        public int getSampleSize() {
+            return available;
+        }
+    }
     
     // 商店行动统计字段（购买的卡牌、遗物、药水、删牌等）
     public List<Rate<Object>> shopActionsTotal = new ArrayList<>();  // 总统计
@@ -127,6 +264,7 @@ public class ClassStat {
         Map<Card, Rate<Card>> cardWinRate = new HashMap<>();
         Map<Neow, Rate<Neow>> neowWinRate = new HashMap<>();
         Map<Neow, Rate<Neow>> neowPickRate = new HashMap<>();
+        Map<Neow, Map<Neow, Integer>> neowBeats = new HashMap<>();
         Map<BossRelic, Rate<BossRelic>> bossRelicPickRateAct1 = new HashMap<>();
         Map<BossRelic, Rate<BossRelic>> bossRelicPickRateAct2 = new HashMap<>();
         Map<BossRelic, Rate<BossRelic>> bossRelicWinRateAct1 = new HashMap<>();
@@ -281,6 +419,41 @@ public class ClassStat {
         Map<Object, Rate<Object>> campfireActionsAct2 = new HashMap<>();
         Map<Object, Rate<Object>> campfireActionsAct3 = new HashMap<>();
         Map<Object, Rate<Object>> campfireActionsAct4 = new HashMap<>();
+
+        // 火堆选项权重：index 0 = 四幕合计，1..4 = 各幕；第二个下标见 OPTION_KEYS。
+        private static final String[] OPTION_KEYS = {"SMITH", "REST", "RECALL", "PURGE", "LIFT", "DIG"};
+        private final int[][] optionChosen = new int[5][6];
+        private final int[][] optionAvailable = new int[5][6];
+        /** sum(1 / 当次可选项数)，用于算「随机选一个」的期望占比。 */
+        private final double[][] optionInvOptions = new double[5][6];
+        private final int[] optionVisits = new int[5];
+        private final int[] recallForced = new int[5];
+        private final int[] recallOptional = new int[5];
+        private final int[] smithUsable = new int[5];
+        private final double[] upgradeExposureSum = new double[5];
+        /**
+         * 每次火堆的「竞争者池」大小之和。
+         *
+         * 池子 = 还能敲的卡牌种类 + 可用的抽烟/举重/挖掘 + 可用的回忆。
+         * 「升级」不单独算一个条目：它就是通往每张牌的入口，拆开以后每张牌各自是一个选项。
+         * 睡觉不进池子 —— 它的约束是血量，和「敲哪张 / 用哪个遗物」不是同一类选择，单独统计。
+         */
+        private final int[] poolSizeSum = new int[5];
+        /** 重建覆盖计数与受影响局数（星盘/空鸟笼）。 */
+        private final int[] campfireRebuildOk = new int[5];
+        private final int[] campfireRebuildMiss = new int[5];
+        private int campfireAstrolabeRuns = 0;
+        private int campfireEmptyCageRuns = 0;
+        private final Map<Card, Integer> campfireMissCard = new HashMap<>();
+
+        // 火堆偏好（卡牌层）：逐次锻造的「可选卡牌种类」与「实际被敲的那张」
+        Map<Card, Rate<Card>> campfireUpgradePrefTotal = new HashMap<>();
+        Map<Card, Rate<Card>> campfireUpgradePrefAct1 = new HashMap<>();
+        Map<Card, Rate<Card>> campfireUpgradePrefAct2 = new HashMap<>();
+        Map<Card, Rate<Card>> campfireUpgradePrefAct3 = new HashMap<>();
+        Map<Card, Rate<Card>> campfireUpgradePrefAct4 = new HashMap<>();
+        /** A 口径的分母：到该幕结束为止「累计拥过」的副本数（不扣后续移出）。index 0 = 四幕合计。 */
+        private final List<Map<Card, Integer>> altOwnedByAct = new ArrayList<>();
         
         // 商店行动统计字段（购买的卡牌、遗物、药水、删牌等）
         Map<Object, Rate<Object>> shopActionsTotal = new HashMap<>();
@@ -368,9 +541,13 @@ public class ClassStat {
             if (run.neowPicked != null && !run.neowSkipped.isEmpty()) {
                 Rate<Neow> pickRate = neowPickRate.computeIfAbsent(run.neowPicked, k -> new Rate<>(k));
                 pickRate.win++;
+                Map<Neow, Integer> beaten = neowBeats.computeIfAbsent(run.neowPicked,
+                        k -> new HashMap<>());
                 run.neowSkipped.forEach(neow -> {
                     Rate<Neow> skipRate = neowPickRate.computeIfAbsent(neow, k -> new Rate<>(k));
                     skipRate.loss++;
+                    // 选中的这个选项，在同场时赢过每个被跳过的选项一次
+                    beaten.merge(neow, 1, Integer::sum);
                 });
             }
         }
@@ -889,6 +1066,792 @@ public class ClassStat {
         }
         
         /**
+         * 火堆选项权重 + 火堆升级权重（卡牌层）。
+         *
+         * 卡牌层回答「这次火堆，卡组里有哪几张还没升级、实际敲了哪张」：
+         * 每次锻造的分母 = 当时卡组里还有未升级副本的卡牌<b>种类</b>数，分子 = 实际被敲的那一张。
+         * 同名多张只算一个选项（敲第 1 张和第 2 张意义相同），全部副本升完即退出分母。
+         * 因此 percent() 可以直接横向比较「有这些候选时，哪张更值得敲」。
+         *
+         * 选项层回答「这次火堆为什么没敲卡」，用同一批火堆访问：
+         * 被选次数 ÷ 该选项真正可选的火堆次数。睡觉始终可选；升级要求还有可升级的未升级卡；
+         * 回忆只在 1-3 幕且尚未回忆时可选；抽烟/举重/挖掘要求当时已拥有和平烟斗/吉里亚/铲子。
+         * 回忆另拆「强制」：到达第四幕的对局必须消耗一个火堆拿红钥匙，这是进入第四幕的固定成本。
+         *
+         * 口径边界：
+         * - 只统计火堆升级；磨刀石/战锤/课程/事件/蛋的升级不在 .run 里逐张记录，少数目标会显得「还没升级」。
+         * - Pandora's Box / Astrolabe 的变化来源没有逐张记录，用最终卡组补差；
+         *   Astrolabe 补进来的牌按已升级处理，空鸟笼删掉的 2 张无法扣减。
+         * - 初始卡组 + 抓牌 + 商店 + 事件 + 变化 + 火堆删牌按楼层重放；事件里的升级（cards_upgraded）也计入。
+         */
+        private void campfireOpportunityStats(Run run) {
+            if (run.campfireChoices == null || run.campfireChoices.isEmpty()) {
+                return;
+            }
+            ReplayModel model = buildReplay(run, knownCards(run));
+            if (model.timeline.isEmpty()) {
+                return;
+            }
+
+            // Pass A：按时间线走一遍，得到「能追踪到的最终卡组」，再和 master_deck 比对补差。
+            DeckState afterRun = initialState(run);
+            for (DeckEvent event : model.timeline) {
+                applyDeckEffect(event, afterRun);
+            }
+            Map<Card, Integer> deficit = new LinkedHashMap<>();
+            for (Map.Entry<Card, Integer> entry : finalDeckCounts(run).entrySet()) {
+                int tracked = afterRun.copies(entry.getKey());
+                if (entry.getValue() > tracked) {
+                    deficit.put(entry.getKey(), entry.getValue() - tracked);
+                }
+            }
+            if (model.supplementFloor > 0 && !deficit.isEmpty()) {
+                model.timeline.add(DeckEvent.deficit(model.supplementFloor,
+                        deficit, model.astrolabeResultsUpgraded));
+                Collections.sort(model.timeline);
+            }
+
+            // 反向补差：重建卡组比终局卡组多出来的副本，是星盘/空鸟笼/潘多拉删掉却没记哪张的牌。
+            // 不扣掉它们会一直留在候选里，把分母撑大（实测平均候选数会多 0.4 张）。
+            Map<Card, Integer> surplus = new LinkedHashMap<>();
+            Map<Card, Integer> finalCounts = finalDeckCounts(run);
+            for (Card card : afterRun.cards.keySet()) {
+                int tracked = afterRun.copies(card);
+                Integer actual = finalCounts.get(card);
+                int kept = actual == null ? 0 : actual;
+                if (tracked > kept) {
+                    surplus.put(card, tracked - kept);
+                }
+            }
+            if (model.supplementFloor > 0 && !surplus.isEmpty()) {
+                model.timeline.add(DeckEvent.surplus(model.supplementFloor, surplus));
+                Collections.sort(model.timeline);
+            }
+
+            // Pass B：逐次火堆记录选项与卡牌暴露，再应用该次选择。
+            DeckState deck = initialState(run);
+            if (altOwnedByAct.isEmpty()) {
+                for (int i = 0; i <= 4; i++) {
+                    altOwnedByAct.add(new HashMap<Card, Integer>());
+                }
+            }
+            // A 口径的分子分母来源：ever 只增不减（累计拥过），幕末快照一次。
+            Map<Card, Integer> ever = new HashMap<>();
+            for (Card card : deck.cards.keySet()) {
+                if (deck.copies(card) > 0) {
+                    ever.put(card, deck.copies(card));
+                }
+            }
+            if (run.ownsRelicAt("Astrolabe", Integer.MAX_VALUE)) {
+                campfireAstrolabeRuns++;
+            }
+            if (run.ownsRelicAt("Empty Cage", Integer.MAX_VALUE)) {
+                campfireEmptyCageRuns++;
+            }
+            boolean recallUsed = false;
+            boolean reachedAct4 = run.getLastActForStats() >= 4;
+            int lifts = 0;
+            int prevAct = 1;
+            for (DeckEvent event : model.timeline) {
+                int eventAct = actOf(run, event.floor);
+                while (prevAct < eventAct) {
+                    snapshotOwned(altOwnedByAct.get(prevAct), ever);
+                    prevAct++;
+                }
+                if (event.kind != KIND_CAMPFIRE) {
+                    if (event.kind == KIND_ADD) {
+                        if (event.card != null) {
+                            int had = ever.containsKey(event.card) ? ever.get(event.card) : 0;
+                            ever.put(event.card, had + 1);
+                        }
+                    } else if (event.kind == KIND_DEFICIT && event.deficit != null) {
+                        for (Map.Entry<Card, Integer> d : event.deficit.entrySet()) {
+                            int had = ever.containsKey(d.getKey()) ? ever.get(d.getKey()) : 0;
+                            ever.put(d.getKey(), had + d.getValue());
+                        }
+                    }
+                    applyDeckEffect(event, deck);
+                    continue;
+                }
+                CampfireChoice choice = event.choice;
+                int act = actOf(run, choice.floor);
+                int option = optionIndex(choice.key);
+
+                boolean[] available = new boolean[OPTION_KEYS.length];
+                // 六个选项都只在「这次火堆真的出现在屏幕上」时才算可选：
+                // 咖啡杯（Coffee Dripper）禁用睡觉，锤子（Fusion Hammer）禁用升级；
+                // 没有可升级的卡时升级也不出现。被禁用的选项不能算「可选却没选」，否则分母被撑大。
+                available[OPT_REST] = !run.ownsRelicAt("Coffee Dripper", choice.floor);
+                available[OPT_SMITH] = !run.ownsRelicAt("Fusion Hammer", choice.floor)
+                        && deck.hasUpgradable();
+                available[OPT_RECALL] = act <= 3 && !recallUsed;
+                available[OPT_PURGE] = run.ownsRelicAt("Peace Pipe", choice.floor);
+                available[OPT_LIFT] = lifts < 3 && run.ownsRelicAt("Girya", choice.floor);
+                available[OPT_DIG] = run.ownsRelicAt("Shovel", choice.floor);
+                if (option >= 0 && !available[option]) {
+                    // 遗物楼层漏记时以实际选择为准，避免出现「被选 > 可选」。
+                    available[option] = true;
+                }
+                int optionCount = 0;
+                for (boolean value : available) {
+                    if (value) {
+                        optionCount++;
+                    }
+                }
+                if (option >= 0) {
+                    optionVisits[act]++;
+                    optionVisits[0]++;
+                    // 竞争者池：可敲卡种 + 可用遗物行动 + 可用回忆（不含睡觉，也不含「升级」本身）
+                    int pool = available[OPT_SMITH] ? deck.upgradableKinds() : 0;
+                    for (int i = 0; i < OPTION_KEYS.length; i++) {
+                        if (i == OPT_SMITH || i == OPT_REST) {
+                            continue;
+                        }
+                        if (available[i]) {
+                            pool++;
+                        }
+                    }
+                    poolSizeSum[act] += pool;
+                    poolSizeSum[0] += pool;
+                    for (int i = 0; i < OPTION_KEYS.length; i++) {
+                        if (!available[i]) {
+                            continue;
+                        }
+                        optionAvailable[act][i]++;
+                        optionAvailable[0][i]++;
+                        optionInvOptions[act][i] += 1.0D / Math.max(1, optionCount);
+                        optionInvOptions[0][i] += 1.0D / Math.max(1, optionCount);
+                    }
+                    optionChosen[act][option]++;
+                    optionChosen[0][option]++;
+                    if (option == OPT_RECALL) {
+                        // 只有第三幕的回忆是「必须」的：要进第四幕，红钥匙必须在第三幕结束前拿到，
+                        // 而第三幕的最后一个火堆是最后机会。第一、二幕回忆属于「提前拿」，
+                        // 玩家本可以留到第三幕，是主动选择而非被迫，所以不算强制。
+                        if (act == 3 && reachedAct4) {
+                            recallForced[act]++;
+                            recallForced[0]++;
+                        } else {
+                            recallOptional[act]++;
+                            recallOptional[0]++;
+                        }
+                    }
+                }
+
+                if (option == OPT_SMITH) {
+                    recordSmith(deck, choice, act);
+                } else if (option == OPT_PURGE) {
+                    deck.remove(upgradePrefCard(choice.data));
+                } else if (option == OPT_LIFT) {
+                    lifts++;
+                } else if (option == OPT_RECALL) {
+                    recallUsed = true;
+                }
+            }
+            for (int a = prevAct; a <= 4; a++) {
+                snapshotOwned(altOwnedByAct.get(a), ever);
+            }
+            if (!altOwnedByAct.get(0).isEmpty() || ever.isEmpty()) {
+                Map<Card, Integer> total = altOwnedByAct.get(0);
+                for (Map.Entry<Card, Integer> entry : ever.entrySet()) {
+                    Integer had = total.get(entry.getKey());
+                    if (had == null || had < entry.getValue()) {
+                        total.put(entry.getKey(), entry.getValue());
+                    }
+                }
+            }
+        }
+
+        /** 幕末快照：该幕结束时「累计拥过」的副本数。 */
+        private static void snapshotOwned(Map<Card, Integer> target, Map<Card, Integer> ever) {
+            for (Map.Entry<Card, Integer> entry : ever.entrySet()) {
+                if (entry.getValue() != null && entry.getValue() > 0) {
+                    target.put(entry.getKey(), entry.getValue());
+                }
+            }
+        }
+
+        /** 一次可用的锻造：分母是当时的未升级卡牌种类，分子是实际被敲的那张。 */
+        private void recordSmith(DeckState deck, CampfireChoice choice, int act) {
+            Card target = upgradePrefCard(choice.data);
+            if (target == null || !deck.contains(target)) {
+                // 目标不在重建卡组里（星盘/空鸟笼删牌无逐张日志）：这次锻造只能靠 A 列估算。
+                campfireRebuildMiss[act]++;
+                campfireRebuildMiss[0]++;
+                if (target != null) {
+                    Integer had = campfireMissCard.get(target);
+                    campfireMissCard.put(target, had == null ? 1 : had + 1);
+                }
+                return;
+            }
+            if (deck.unupgraded(target) <= 0) {
+                campfireRebuildMiss[act]++;
+                campfireRebuildMiss[0]++;
+                Integer had = campfireMissCard.get(target);
+                campfireMissCard.put(target, had == null ? 1 : had + 1);
+                deck.upgrade(target);
+                return;
+            }
+            campfireRebuildOk[act]++;
+            campfireRebuildOk[0]++;
+            smithUsable[act]++;
+            smithUsable[0]++;
+
+            int exposure = 0;
+            for (Map.Entry<Card, int[]> entry : deck.cards.entrySet()) {
+                Card card = entry.getKey();
+                if (isUpgradeImmune(card.name) || deck.unupgraded(card) <= 0) {
+                    continue;
+                }
+                exposure++;
+                addExposure(upgradePrefMapInstance(act), card);
+                addExposure(campfireUpgradePrefTotal, card);
+            }
+            Rate<Card> chosenAct = upgradePrefMapInstance(act).get(target);
+            Rate<Card> chosenTotal = campfireUpgradePrefTotal.get(target);
+            if (chosenAct == null || chosenTotal == null) {
+                deck.upgrade(target);
+                return;
+            }
+            chosenAct.win++;
+            chosenAct.loss--;
+            chosenTotal.win++;
+            chosenTotal.loss--;
+            upgradeExposureSum[act] += exposure;
+            upgradeExposureSum[0] += exposure;
+            deck.upgrade(target);
+        }
+
+        private static void addExposure(Map<Card, Rate<Card>> map, Card card) {
+            Rate<Card> rate = map.get(card);
+            if (rate == null) {
+                rate = new Rate<>(card);
+                map.put(card, rate);
+            }
+            rate.loss++;
+        }
+
+        /** 初始卡组 + 尼奥的获得/删除/变化/升级。 */
+        private static DeckState initialState(Run run) {
+            DeckState deck = new DeckState();
+            addStartingDeck(run, deck);
+            NeowBonusLog neow = run.neowBonusLog;
+            if (neow != null) {
+                for (String raw : safeList(neow.cardsObtained)) {
+                    deck.add(upgradePrefCard(raw), isUpgradedId(raw));
+                }
+                for (String raw : safeList(neow.cardsRemoved)) {
+                    deck.remove(upgradePrefCard(raw));
+                }
+                for (String raw : safeList(neow.cardsTransformed)) {
+                    deck.remove(upgradePrefCard(raw));
+                }
+                for (String raw : safeList(neow.cardsUpgraded)) {
+                    deck.upgrade(upgradePrefCard(raw));
+                }
+            }
+            return deck;
+        }
+
+        private static void addStartingDeck(Run run, DeckState deck) {
+            AbstractPlayer.PlayerClass pc = run.playerClass;
+            if (pc == AbstractPlayer.PlayerClass.IRONCLAD) {
+                deck.add("Strike", 5);
+                deck.add("Defend", 4);
+                deck.add("Bash", 1);
+            } else if (pc == AbstractPlayer.PlayerClass.THE_SILENT) {
+                deck.add("Strike", 5);
+                deck.add("Defend", 5);
+                deck.add("Neutralize", 1);
+                deck.add("Survivor", 1);
+            } else if (pc == AbstractPlayer.PlayerClass.DEFECT) {
+                deck.add("Strike", 4);
+                deck.add("Defend", 4);
+                deck.add("Zap", 1);
+                deck.add("Dualcast", 1);
+            } else if (pc == AbstractPlayer.PlayerClass.WATCHER) {
+                deck.add("Strike", 4);
+                deck.add("Defend", 4);
+                deck.add("Eruption", 1);
+                deck.add("Vigilance", 1);
+            }
+            if (run.ascensionLevel >= 10) {
+                deck.add("Ascender's Bane", 1);
+            }
+        }
+
+        /** 已知卡名集合，用于区分商店里的卡牌与遗物/药水。 */
+        private static Set<String> knownCards(Run run) {
+            Set<String> known = new HashSet<>();
+            for (Card card : run.masterDeck) {
+                Card base = upgradePrefCard(card.name);
+                if (base != null) {
+                    known.add(base.name);
+                }
+            }
+            for (CardChoiceStats choice : run.runData.card_choices) {
+                if (choice != null) {
+                    addKnown(known, choice.picked);
+                }
+            }
+            for (EventStats event : run.eventStats) {
+                if (event == null) {
+                    continue;
+                }
+                for (String raw : safeList(event.cards_obtained)) {
+                    addKnown(known, raw);
+                }
+            }
+            if (run.neowBonusLog != null) {
+                for (String raw : safeList(run.neowBonusLog.cardsObtained)) {
+                    addKnown(known, raw);
+                }
+            }
+            return known;
+        }
+
+        private static Map<Card, Integer> finalDeckCounts(Run run) {
+            Map<Card, Integer> counts = new HashMap<>();
+            for (Card card : run.masterDeck) {
+                Card base = upgradePrefCard(card.name);
+                if (base == null) {
+                    continue;
+                }
+                Integer old = counts.get(base);
+                counts.put(base, old == null ? 1 : old + 1);
+            }
+            return counts;
+        }
+
+        /**
+         * 把本局的卡牌变化整理成按楼层排序的时间线。campfire_choices 也进时间线，
+         * 这样每次火堆之前应用的是同一份卡组状态。
+         */
+        private ReplayModel buildReplay(Run run, Set<String> knownCards) {
+            List<DeckEvent> timeline = new ArrayList<>();
+            int seq = 0;
+
+            for (CardChoiceStats choice : run.runData.card_choices) {
+                if (choice == null || choice.picked == null) {
+                    continue;
+                }
+                Card card = upgradePrefCard(choice.picked);
+                if (card == null || "SKIP".equals(card.name) || "Singing Bowl".equals(card.name)) {
+                    continue;
+                }
+                timeline.add(DeckEvent.add(choice.floor, seq++, card, isUpgradedId(choice.picked)));
+            }
+
+            for (int i = 0; i < run.itemsPurchased.size(); i++) {
+                String raw = run.itemsPurchased.get(i);
+                if (!isCardName(raw, knownCards)) {
+                    continue;
+                }
+                int floor = i < run.itemPurchaseFloors.size() ? run.itemPurchaseFloors.get(i) : 1;
+                timeline.add(DeckEvent.add(floor, seq++, upgradePrefCard(raw), isUpgradedId(raw)));
+            }
+
+            if (run.itemsPurged != null) {
+                for (int i = 0; i < run.itemsPurged.size(); i++) {
+                    int floor = i < run.itemsPurgedFloors.size() ? run.itemsPurgedFloors.get(i) : 1;
+                    timeline.add(DeckEvent.remove(floor, seq++, upgradePrefCard(run.itemsPurged.get(i))));
+                }
+            }
+
+            for (EventStats event : run.eventStats) {
+                if (event == null) {
+                    continue;
+                }
+                int floor = event.floor <= 0 ? 1 : event.floor;
+                for (String raw : safeList(event.cards_obtained)) {
+                    timeline.add(DeckEvent.add(floor, seq++, upgradePrefCard(raw), isUpgradedId(raw)));
+                }
+                for (String raw : safeList(event.cards_removed)) {
+                    timeline.add(DeckEvent.remove(floor, seq++, upgradePrefCard(raw)));
+                }
+                for (String raw : safeList(event.cards_transformed)) {
+                    timeline.add(DeckEvent.remove(floor, seq++, upgradePrefCard(raw)));
+                }
+                for (String raw : safeList(event.cards_upgraded)) {
+                    timeline.add(DeckEvent.upgrade(floor, seq++, upgradePrefCard(raw)));
+                }
+            }
+
+            for (CampfireChoice choice : run.campfireChoices) {
+                if (choice != null) {
+                    timeline.add(DeckEvent.campfire(choice.floor <= 0 ? 1 : choice.floor, seq++, choice));
+                }
+            }
+
+            int supplementFloor = 0;
+            boolean astrolabe = false;
+            if (run.bossRelicChoiceStats != null) {
+                for (int i = 0; i < run.bossRelicChoiceStats.size() && i < 2; i++) {
+                    BossRelicChoiceStats choice = run.bossRelicChoiceStats.get(i);
+                    if (choice == null || choice.picked == null) {
+                        continue;
+                    }
+                    int bossFloor = i == 0 ? run.act1BossFloor : run.act2BossFloor;
+                    if ("Pandora's Box".equals(choice.picked)) {
+                        if (bossFloor > 0) {
+                            timeline.add(DeckEvent.pandora(bossFloor, seq++));
+                        }
+                        if (supplementFloor == 0) {
+                            supplementFloor = Math.max(1, bossFloor);
+                        }
+                    } else if ("Astrolabe".equals(choice.picked)) {
+                        astrolabe = true;
+                        if (supplementFloor == 0) {
+                            supplementFloor = Math.max(1, bossFloor);
+                        }
+                    } else if ("Tiny House".equals(choice.picked)
+                            || "Orrery".equals(choice.picked)
+                            || "Calling Bell".equals(choice.picked)) {
+                        if (supplementFloor == 0) {
+                            supplementFloor = Math.max(1, bossFloor);
+                        }
+                    }
+                }
+            }
+
+            Collections.sort(timeline);
+            return new ReplayModel(timeline, supplementFloor, astrolabe);
+        }
+
+        private static void applyDeckEffect(DeckEvent event, DeckState deck) {
+            switch (event.kind) {
+                case KIND_ADD:
+                    deck.add(event.card, event.upgraded);
+                    break;
+                case KIND_REMOVE:
+                    deck.remove(event.card);
+                    break;
+                case KIND_UPGRADE:
+                    deck.upgrade(event.card);
+                    break;
+                case KIND_PANDORA:
+                    deck.removeAll(upgradePrefCard("Strike"));
+                    deck.removeAll(upgradePrefCard("Defend"));
+                    break;
+                case KIND_CAMPFIRE:
+                    if ("SMITH".equals(event.choice.key)) {
+                        deck.upgrade(upgradePrefCard(event.choice.data));
+                    } else if ("PURGE".equals(event.choice.key)) {
+                        deck.remove(upgradePrefCard(event.choice.data));
+                    }
+                    break;
+                case KIND_DEFICIT:
+                    for (Map.Entry<Card, Integer> entry : event.deficit.entrySet()) {
+                        for (int i = 0; i < entry.getValue(); i++) {
+                            deck.add(entry.getKey(), event.upgraded);
+                        }
+                    }
+                    break;
+                case KIND_SURPLUS:
+                    // 反向补差：这些副本在重建里还在、终局卡组却没有，说明被星盘/空鸟笼/潘多拉删掉了
+                    for (Map.Entry<Card, Integer> entry : event.deficit.entrySet()) {
+                        for (int i = 0; i < entry.getValue(); i++) {
+                            deck.remove(entry.getKey());
+                        }
+                    }
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        private static int optionIndex(String key) {
+            if (key == null) {
+                return -1;
+            }
+            for (int i = 0; i < OPTION_KEYS.length; i++) {
+                if (OPTION_KEYS[i].equals(key)) {
+                    return i;
+                }
+            }
+            return -1;
+        }
+
+        private static boolean isUpgradedId(String raw) {
+            return raw != null && raw.contains("+");
+        }
+
+        private static boolean isUpgradeImmune(String name) {
+            return name != null && UPGRADE_IMMUNE.contains(name);
+        }
+
+        private static void addKnown(Set<String> knownCards, String raw) {
+            Card card = upgradePrefCard(raw);
+            if (card != null) {
+                knownCards.add(card.name);
+            }
+        }
+
+        private boolean isCardName(String raw, Set<String> knownCards) {
+            Card card = upgradePrefCard(raw);
+            if (card == null) {
+                return false;
+            }
+            if (knownCards.contains(card.name)) {
+                return true;
+            }
+            try {
+                if (CardLibrary.getCard(card.name) != null) {
+                    return true;
+                }
+            } catch (Throwable ignored) {
+                // 游戏尚未初始化 CardLibrary（例如纯数据校验）时退回 knownCards
+            }
+            return false;
+        }
+
+        private static List<String> safeList(List<String> list) {
+            return list == null ? java.util.Collections.<String>emptyList() : list;
+        }
+
+        private static Card upgradePrefCard(String raw) {
+            if (raw == null) {
+                return null;
+            }
+            String base = raw.split("\\+")[0];
+            if (base.isEmpty()) {
+                return null;
+            }
+            if (base.startsWith("Strike_")) {
+                base = "Strike";
+            } else if (base.startsWith("Defend_")) {
+                base = "Defend";
+            } else if ("AscendersBane".equals(base)) {
+                base = "Ascender's Bane";
+            }
+            return Card.fromStringIgnoreUpgrades(base);
+        }
+
+        private static int actOf(int act) {
+            return act < 1 ? 1 : (act > 4 ? 4 : act);
+        }
+
+        private static int actOf(Run run, int floor) {
+            return actOf(run.getAct(floor));
+        }
+
+        private Map<Card, Rate<Card>> upgradePrefMapInstance(int act) {
+            switch (act) {
+                case 1: return campfireUpgradePrefAct1;
+                case 2: return campfireUpgradePrefAct2;
+                case 3: return campfireUpgradePrefAct3;
+                case 4: return campfireUpgradePrefAct4;
+                default: return campfireUpgradePrefTotal;
+            }
+        }
+
+        private static final int OPT_SMITH = 0;
+        private static final int OPT_REST = 1;
+        private static final int OPT_RECALL = 2;
+        private static final int OPT_PURGE = 3;
+        private static final int OPT_LIFT = 4;
+        private static final int OPT_DIG = 5;
+
+        /** 不能升级的诅咒/状态/进阶之灾。 */
+        private static final Set<String> UPGRADE_IMMUNE = new HashSet<>(java.util.Arrays.asList(
+                "Ascender's Bane", "Clumsy", "Curse of the Bell", "CurseOfTheBell", "Decay", "Doubt",
+                "Injury", "Necronomicurse", "Normality", "Pain", "Parasite", "Pride", "Regret",
+                "Shame", "Void", "Writhe", "Burn", "Dazed", "Slimed", "Wound"));
+
+        private static final int KIND_ADD = 0;
+        private static final int KIND_REMOVE = 1;
+        private static final int KIND_UPGRADE = 2;
+        private static final int KIND_PANDORA = 3;
+        private static final int KIND_CAMPFIRE = 4;
+        private static final int KIND_DEFICIT = 5;
+        /** 反向补差：重建卡组里比终局卡组多出来的副本（星盘/空鸟笼/潘多拉删掉但没记哪张）。 */
+        private static final int KIND_SURPLUS = 6;
+
+        private static final int ORDER_DECK = 0;
+        private static final int ORDER_CAMPFIRE = 1;
+        private static final int ORDER_DEFICIT = 2;
+        private static final int ORDER_SURPLUS = 3;
+
+        private static final class ReplayModel {
+            final List<DeckEvent> timeline;
+            final int supplementFloor;
+            final boolean astrolabeResultsUpgraded;
+
+            ReplayModel(List<DeckEvent> timeline, int supplementFloor, boolean astrolabeResultsUpgraded) {
+                this.timeline = timeline;
+                this.supplementFloor = supplementFloor;
+                this.astrolabeResultsUpgraded = astrolabeResultsUpgraded;
+            }
+        }
+
+        private static final class DeckEvent implements Comparable<DeckEvent> {
+            final int floor;
+            final int order;
+            final int seq;
+            final int kind;
+            final Card card;
+            final boolean upgraded;
+            final CampfireChoice choice;
+            final Map<Card, Integer> deficit;
+
+            private DeckEvent(int floor, int order, int seq, int kind, Card card, boolean upgraded,
+                              CampfireChoice choice, Map<Card, Integer> deficit) {
+                this.floor = Math.max(1, floor);
+                this.order = order;
+                this.seq = seq;
+                this.kind = kind;
+                this.card = card;
+                this.upgraded = upgraded;
+                this.choice = choice;
+                this.deficit = deficit;
+            }
+
+            static DeckEvent add(int floor, int seq, Card card, boolean upgraded) {
+                return new DeckEvent(floor, ORDER_DECK, seq, KIND_ADD, card, upgraded, null, null);
+            }
+
+            static DeckEvent remove(int floor, int seq, Card card) {
+                return new DeckEvent(floor, ORDER_DECK, seq, KIND_REMOVE, card, false, null, null);
+            }
+
+            static DeckEvent upgrade(int floor, int seq, Card card) {
+                return new DeckEvent(floor, ORDER_DECK, seq, KIND_UPGRADE, card, false, null, null);
+            }
+
+            static DeckEvent pandora(int floor, int seq) {
+                return new DeckEvent(floor, ORDER_DECK, seq, KIND_PANDORA, null, false, null, null);
+            }
+
+            static DeckEvent campfire(int floor, int seq, CampfireChoice choice) {
+                return new DeckEvent(floor, ORDER_CAMPFIRE, seq, KIND_CAMPFIRE, null, false, choice, null);
+            }
+
+            static DeckEvent deficit(int floor, Map<Card, Integer> deficit, boolean upgraded) {
+                return new DeckEvent(floor, ORDER_DEFICIT, Integer.MAX_VALUE, KIND_DEFICIT,
+                        null, upgraded, null, deficit);
+            }
+
+            static DeckEvent surplus(int floor, Map<Card, Integer> surplus) {
+                return new DeckEvent(floor, ORDER_SURPLUS, Integer.MAX_VALUE, KIND_SURPLUS,
+                        null, false, null, surplus);
+            }
+
+            @Override
+            public int compareTo(DeckEvent other) {
+                if (floor != other.floor) {
+                    return Integer.compare(floor, other.floor);
+                }
+                if (order != other.order) {
+                    return Integer.compare(order, other.order);
+                }
+                return Integer.compare(seq, other.seq);
+            }
+        }
+
+        /** 逐次火堆使用的卡组状态：每个卡名的副本数与其中已升级的副本数。 */
+        private static final class DeckState {
+            final Map<Card, int[]> cards = new HashMap<>();
+
+            void add(String name, int count) {
+                for (int i = 0; i < count; i++) {
+                    add(upgradePrefCard(name), false);
+                }
+            }
+
+            void add(Card card, boolean upgraded) {
+                if (card == null) {
+                    return;
+                }
+                int[] values = cards.get(card);
+                if (values == null) {
+                    values = new int[2];
+                    cards.put(card, values);
+                }
+                values[0]++;
+                if (upgraded) {
+                    values[1]++;
+                }
+            }
+
+            void remove(Card card) {
+                if (card == null) {
+                    return;
+                }
+                int[] values = cards.get(card);
+                if (values == null || values[0] <= 0) {
+                    return;
+                }
+                values[0]--;
+                if (values[1] > values[0]) {
+                    values[1] = values[0];
+                }
+                if (values[0] == 0) {
+                    cards.remove(card);
+                }
+            }
+
+            void removeAll(Card card) {
+                if (card != null) {
+                    cards.remove(card);
+                }
+            }
+
+            void upgrade(Card card) {
+                if (card == null) {
+                    return;
+                }
+                int[] values = cards.get(card);
+                if (values == null || values[0] <= 0) {
+                    return;
+                }
+                if (values[1] < values[0]) {
+                    values[1]++;
+                }
+            }
+
+            boolean contains(Card card) {
+                return card != null && cards.containsKey(card);
+            }
+
+            int copies(Card card) {
+                int[] values = card == null ? null : cards.get(card);
+                return values == null ? 0 : values[0];
+            }
+
+            /** 未升级副本数；灼热攻击可以反复敲，所以只要还有副本就仍算可选。 */
+            int unupgraded(Card card) {
+                int[] values = card == null ? null : cards.get(card);
+                if (values == null) {
+                    return 0;
+                }
+                if ("Searing Blow".equals(card.name)) {
+                    return values[0];
+                }
+                return values[0] - values[1];
+            }
+
+            boolean hasUpgradable() {
+                for (Card card : cards.keySet()) {
+                    if (!isUpgradeImmune(card.name) && unupgraded(card) > 0) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            /** 还能敲的卡牌种类数（同名多张算 1 种），即「升级」这个入口拆开后的选项个数。 */
+            int upgradableKinds() {
+                int n = 0;
+                for (Card card : cards.keySet()) {
+                    if (!isUpgradeImmune(card.name) && unupgraded(card) > 0) {
+                        n++;
+                    }
+                }
+                return n;
+            }
+        }
+
+        /**
          * 移除卡牌名称中的升级后缀（+1, +2, +3）并进行名称标准化
          * 例如："Tactician+1" -> "Tactician"
          *       "Adaptation+1" -> "Rushdown" （游戏版本更新后的名称映射）
@@ -956,9 +1919,15 @@ public class ClassStat {
                         act = run.getAct(floor);
                     }
                     
+                    // 药水在 items_purchased 里有两种写法：ID（PowerPotion）和显示名（Swift Potion）。
+                    // 不去空格会拆成两条统计、且映射表只认 ID，所以先归一化成 ID 形式。
+                    String purchaseName = itemKey;
+                    if (purchaseName != null && purchaseName.endsWith(" Potion")) {
+                        purchaseName = purchaseName.replace(" ", "");
+                    }
                     // 对卡牌名称进行标准化处理（移除升级后缀）
-                    String normalizedKey = normalizeCardName(itemKey);
-                    Object statKey = (normalizedKey != null) ? normalizedKey : itemKey;
+                    String normalizedKey = normalizeCardName(purchaseName);
+                    Object statKey = (normalizedKey != null) ? normalizedKey : purchaseName;
                     
                     // 总统计
                     Rate<Object> totalRate = shopActionsTotal.computeIfAbsent(statKey, k -> new Rate<>(k));
@@ -1079,6 +2048,7 @@ public class ClassStat {
             purgeStats(run);  // 统计删牌数据
             questionMarkAndEventStats(run);  // 统计问号和事件
             campfireActionStats(run);  // 统计火堆行动
+            campfireOpportunityStats(run);  // 火堆选项权重 + 卡牌升级权重（逐次重放卡组）
             shopActionStats(run);  // 统计商店行动
         }
 
@@ -1107,6 +2077,7 @@ public class ClassStat {
             cs.cardPicksAfterAct1 = sortedMapValues(cardPicksAfterAct1);
             cs.cardWinRate = sortedMapValues(cardWinRate);
             cs.neowPickRate = sortedMapValues(neowPickRate);
+            cs.neowBeats.putAll(neowBeats);
             cs.neowWinRate = sortedMapValues(neowWinRate);
 
             cs.bossRelicPickRateAct1 = sortedMapValues(bossRelicPickRateAct1);
@@ -1179,9 +2150,69 @@ public class ClassStat {
             cs.campfireActionsAct2 = sortedMapValuesByCount(campfireActionsAct2);
             cs.campfireActionsAct3 = sortedMapValuesByCount(campfireActionsAct3);
             cs.campfireActionsAct4 = sortedMapValuesByCount(campfireActionsAct4);
-            
+
+            // 火堆统一分母：行动占比、占锻造、占火堆都从这两个计数出发。
+            fillCampfireCounts(cs, 1, campfireActionsAct1);
+            fillCampfireCounts(cs, 2, campfireActionsAct2);
+            fillCampfireCounts(cs, 3, campfireActionsAct3);
+            fillCampfireCounts(cs, 4, campfireActionsAct4);
+            for (int act = 1; act <= 4; act++) {
+                cs.campfireVisits[0] += cs.campfireVisits[act];
+                cs.campfireSmiths[0] += cs.campfireSmiths[act];
+            }
+
             // 为火堆行动添加总数统计（强制放在第一个）
             insertCampfireTotal(cs);
+
+            // 火堆偏好（卡牌层）：按权重降序（win=被敲次数，loss=可选但没敲的次数）
+            cs.campfireUpgradePrefTotal = sortedMapValues(campfireUpgradePrefTotal);
+            cs.campfireUpgradePrefAct1 = sortedMapValues(campfireUpgradePrefAct1);
+            cs.campfireUpgradePrefAct2 = sortedMapValues(campfireUpgradePrefAct2);
+            cs.campfireUpgradePrefAct3 = sortedMapValues(campfireUpgradePrefAct3);
+            cs.campfireUpgradePrefAct4 = sortedMapValues(campfireUpgradePrefAct4);
+
+            // 火堆选项权重：固定 6 行，顺序与 OPTION_KEYS 一致
+            cs.campfireOptionsTotal = buildCampfireOptions(0);
+            cs.campfireOptionsAct1 = buildCampfireOptions(1);
+            cs.campfireOptionsAct2 = buildCampfireOptions(2);
+            cs.campfireOptionsAct3 = buildCampfireOptions(3);
+            cs.campfireOptionsAct4 = buildCampfireOptions(4);
+
+            // 火堆决策分布：把「升级」拆回每张卡，与遗物行动、非强制回忆同台竞争
+            cs.campfireChoiceDistTotal = buildChoiceDist(0);
+            cs.campfireChoiceDistAct1 = buildChoiceDist(1);
+            cs.campfireChoiceDistAct2 = buildChoiceDist(2);
+            cs.campfireChoiceDistAct3 = buildChoiceDist(3);
+            cs.campfireChoiceDistAct4 = buildChoiceDist(4);
+
+            // A 口径（替补）：锻造次数 ÷ 累计拥过副本数，不受删牌影响
+            cs.campfireUpgradeAltTotal = buildAltRates(0);
+            cs.campfireUpgradeAltAct1 = buildAltRates(1);
+            cs.campfireUpgradeAltAct2 = buildAltRates(2);
+            cs.campfireUpgradeAltAct3 = buildAltRates(3);
+            cs.campfireUpgradeAltAct4 = buildAltRates(4);
+
+            for (int act = 0; act <= 4; act++) {
+                cs.campfireSmithUsable[act] = smithUsable[act];
+                cs.campfireRecallForced[act] = recallForced[act];
+                cs.campfireRecallOptional[act] = recallOptional[act];
+                cs.campfireRebuildOk[act] = campfireRebuildOk[act];
+                cs.campfireRebuildMiss[act] = campfireRebuildMiss[act];
+                // 「升级」被拆成每张牌以后，池子 = 可敲卡种 + 可用遗物行动 + 可用回忆；
+                // 卡牌和遗物共用这一个基线，倍数才能放在同一张榜上比。
+                double poolAvg = optionVisits[act] > 0
+                        ? (double) poolSizeSum[act] / optionVisits[act] : 0.0D;
+                cs.campfireUpgradeAvgOptions[act] = poolAvg;
+                cs.campfireUpgradeBaseline[act] = poolAvg > 0.0D ? 100.0D / poolAvg : 0.0D;
+                // 睡觉另算：分母是火堆访问次数，不进竞争者池
+                double screenOptions = optionVisits[act] > 0
+                        ? (double) optionAvailableSum(act) / optionVisits[act] : 0.0D;
+                cs.campfireAvgOptions[act] = screenOptions;
+                cs.campfireOptionBaseline[act] = poolAvg > 0.0D ? 100.0D / poolAvg : 0.0D;
+            }
+            cs.campfireAstrolabeRuns = campfireAstrolabeRuns;
+            cs.campfireEmptyCageRuns = campfireEmptyCageRuns;
+            cs.campfireUpgradeMissCard = campfireMissCard;
             
             // 转移商店行动统计数据（将 Map 转换为排序后的 List）
             // 商店行动使用次数优先排序
@@ -1195,6 +2226,103 @@ public class ClassStat {
             insertShopTotal(cs);
         }
         
+        /** 统计一幕的火堆访问次数与锻造次数；SMITH 的 key 是卡牌，其他行动 key 是字符串。 */
+        private static void fillCampfireCounts(ClassStat cs, int act, Map<Object, Rate<Object>> actions) {
+            int visits = 0;
+            int smiths = 0;
+            for (Rate<Object> rate : actions.values()) {
+                if (rate == null) {
+                    continue;
+                }
+                int count = rate.total();
+                visits += count;
+                if (rate.what instanceof Card) {
+                    smiths += count;
+                }
+            }
+            cs.campfireVisits[act] = visits;
+            cs.campfireSmiths[act] = smiths;
+        }
+
+        private int optionAvailableSum(int act) {
+            int sum = 0;
+            for (int i = 0; i < OPTION_KEYS.length; i++) {
+                sum += optionAvailable[act][i];
+            }
+            return sum;
+        }
+
+        /** 固定输出 6 个火堆选项；baseline 为在“可用选项数相同”前提下随机选择的期望权重。 */
+        private List<ClassStat.CampfireOption> buildCampfireOptions(int act) {
+            List<ClassStat.CampfireOption> rows = new ArrayList<>(OPTION_KEYS.length);
+            // 统一基线：100 ÷ 平均池子大小。卡牌和遗物共用它，倍数才能同榜比较。
+            double poolAvg = optionVisits[act] > 0 ? (double) poolSizeSum[act] / optionVisits[act] : 0.0D;
+            double baseline = poolAvg > 0.0D ? 100.0D / poolAvg : 0.0D;
+            for (int i = 0; i < OPTION_KEYS.length; i++) {
+                int available = optionAvailable[act][i];
+                int forced = i == OPT_RECALL ? recallForced[act] : 0;
+                int optional = i == OPT_RECALL ? recallOptional[act] : 0;
+                rows.add(new ClassStat.CampfireOption(OPTION_KEYS[i], optionChosen[act][i],
+                        available, baseline, forced, optional));
+            }
+            return rows;
+        }
+
+        /**
+         * 火堆统一榜：把「升级」拆回每张可敲的牌，和抽烟/举重/挖掘/回忆放在同一张榜上按占比排序。
+         *
+         * - 每张牌一行：chosen = 被敲次数，visits = 它出现在候选里的火堆次数。
+         * - 每个行动一行：chosen = 被选次数，visits = 它真正可选的次数。
+         * - 「升级」本身不进来（它就是通往每张牌的入口），睡觉也不进来（约束是血量，单独统计）。
+         * - 所有行的分母虽然来源不同，但都是「该条目出现时被选中的比例」，可以直接横向比。
+         */
+        private List<ClassStat.CampfireShare> buildChoiceDist(int act) {
+            List<ClassStat.CampfireShare> rows = new ArrayList<ClassStat.CampfireShare>();
+            for (Rate<Card> rate : upgradePrefMapInstance(act).values()) {
+                if (rate == null || rate.what == null || rate.total() <= 0) {
+                    continue;
+                }
+                rows.add(new ClassStat.CampfireShare(rate.what, rate.win, rate.total(), true));
+            }
+            for (ClassStat.CampfireOption option : buildCampfireOptions(act)) {
+                if ("SMITH".equals(option.key) || "REST".equals(option.key) || option.available <= 0) {
+                    continue;
+                }
+                rows.add(new ClassStat.CampfireShare(option.key, option.chosen, option.available, false));
+            }
+            Collections.sort(rows, (a, b) -> Double.compare(b.percent(), a.percent()));
+            return rows;
+        }
+
+        /**
+         * A 口径（替补）：该幕锻造次数 ÷ 到该幕结束「累计拥过」的副本数。
+         * 只依赖获得记录、不依赖当时的卡组快照，所以星盘/空鸟笼删掉哪张都不影响它。
+         * 适合在重建失败（某次锻造的目标仍找不到）时读，代价是它回答的是「最终被敲率」，
+         * 不是「每次火堆被选中的概率」。
+         */
+        private List<Rate<Card>> buildAltRates(int act) {
+            Map<Card, Integer> owned = act < altOwnedByAct.size() ? altOwnedByAct.get(act) : null;
+            if (owned == null || owned.isEmpty()) {
+                return new ArrayList<>();
+            }
+            Map<Card, Rate<Card>> pref = upgradePrefMapInstance(act);
+            Map<Card, Rate<Card>> out = new HashMap<>();
+            for (Map.Entry<Card, Integer> entry : owned.entrySet()) {
+                Card card = entry.getKey();
+                int total = entry.getValue() == null ? 0 : entry.getValue();
+                if (total <= 0 || isUpgradeImmune(card.name)) {
+                    continue;
+                }
+                Rate<Card> source = pref.get(card);
+                int win = source == null ? 0 : Math.min(source.win, total);
+                Rate<Card> alt = new Rate<>(card);
+                alt.win = win;
+                alt.loss = total - win;
+                out.put(card, alt);
+            }
+            return sortedMapValues(out);
+        }
+
         /**
          * 为火堆行动添加总数统计（将各幕的总数汇总，强制插入到第一位置）
          */

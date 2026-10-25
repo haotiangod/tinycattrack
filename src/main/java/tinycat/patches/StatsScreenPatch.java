@@ -6,6 +6,7 @@ import tinycat.NameMapper;
 import tinycat.Utils;
 import tinycat.stats.*;
 import tinycat.tier.MonsterTierExporter;
+import tinycat.tier.NeowShort;
 import tinycat.tier.TierListExporter;
 import tinycat.tier.TierListScope;
 import tinycat.tinycat;
@@ -26,6 +27,8 @@ import com.megacrit.cardcrawl.screens.stats.StatsScreen;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -331,7 +334,59 @@ public class StatsScreenPatch {
         renderY -= 100 * Settings.scale;
         renderHeader(sb, colorForClass(Localization.get(LocalizationKeys.UI_NEOW_PICK_RATE)), screenX, renderY);
 
-        renderRates1Col(sb, screenX, renderY, 0, cs.neowPickRate);
+        renderNeowOptions(sb, screenX, renderY, cs.neowPickRate);
+    }
+
+    /**
+     * 尼奥选项按「选中次数 ÷ 全部尼奥选择次数」显示。
+     *
+     * 不能复用 renderRates1Col 的 percent()：.run 里被跳过选项的代价全是 NONE，
+     * 带代价的选项收不到跳过计数，win/(win+loss) 会恒等于 100%。
+     */
+    private static void renderNeowOptions(SpriteBatch sb, float screenX, float renderY,
+                                          List<Rate<Neow>> rates) {
+        if (rates == null || rates.isEmpty()) {
+            return;
+        }
+        int minSample = moreStatsScreen.sampleSizeDropdown.getSelectedIndex();
+        int totalSelected = 0;
+        for (Rate<Neow> rate : rates) {
+            if (rate != null && rate.what != null && rate.win > 0) {
+                totalSelected += rate.win;
+            }
+        }
+        final String color = getCharColor();
+        StringBuilder builder = new StringBuilder();
+        // 分母用「该选项被提供的次数」（选中 + 被跳过），不是总局数：
+        // 用总局数会让「出现频率低的选项」永远看起来没人选。排序也按选取率。
+        List<Rate<Neow>> ordered = new ArrayList<Rate<Neow>>(rates);
+        Collections.sort(ordered, new Comparator<Rate<Neow>>() {
+            @Override
+            public int compare(Rate<Neow> a, Rate<Neow> b) {
+                return Double.compare(b.percent(), a.percent());
+            }
+        });
+        for (Rate<Neow> rate : ordered) {
+            if (rate == null || !(rate.what instanceof Neow) || rate.win <= 0
+                    || rate.getSampleSize() < minSample) {
+                continue;
+            }
+            Neow neow = (Neow) rate.what;
+            int offered = rate.total();
+            double pct = offered > 0 ? 100.0D * rate.win / offered : 0.0D;
+            builder.append(NeowShort.zh(neow.bonus, neow.cost))
+                    .append(" ")
+                    .append(color)
+                    .append(String.format("%.1f%% (%d/%d) NL ", pct, rate.win, offered));
+        }
+        FontHelper.renderSmartText(sb,
+                FontHelper.panelNameFont,
+                builder.toString(),
+                screenX + 75.0F * Settings.scale,
+                renderY + 766.0F * Settings.yScale,
+                9999.0F,
+                38.0F * Settings.scale,
+                Settings.CREAM_COLOR);
     }
 
     private static void renderBossRelicPickRate(StatsScreen s, SpriteBatch sb, float screenX) {
@@ -708,6 +763,7 @@ public class StatsScreenPatch {
     
     private static float renderCampfireAct(SpriteBatch sb, float screenX, float renderY, String actName, List<Rate<Object>> actions) {
         final String color = getCharColor();
+        final int actTotal = totalActionCount(actions, "火堆总数");
         renderHeader(sb, colorForClass(actName), screenX, renderY);
         renderY -= 22.0F * Settings.scale;
         
@@ -730,7 +786,13 @@ public class StatsScreenPatch {
                 // 卡牌
                 displayName = NameMapper.toChinese(what.toString());
             }
-            return displayName + " " + color + String.format("%.1f", c.percent()) + "% " + c.winLoss();
+            // 火堆的 win 记的是次数、loss 为 0，percent() 会恒等于 100%；
+            // 真正有意义的是「这次行动占该幕火堆行动的比例」。
+            if ("火堆总数".equals(what)) {
+                return displayName + " " + color + actTotal + " 次";
+            }
+            // 行动表看的是「做了几次」，不是占比
+            return displayName + " " + color + c.total() + " 次";
         });
         
         // 计算渲染后的高度偏移（最多显示35项）
@@ -754,6 +816,8 @@ public class StatsScreenPatch {
     
     private static float renderShopAct(SpriteBatch sb, float screenX, float renderY, String actName, List<Rate<Object>> actions) {
         final String color = getCharColor();
+        final int shopTotal = totalActionCount(actions, "商店总数");
+        final int purchaseTotal = shopPurchaseCount(actions);
         renderHeader(sb, colorForClass(actName), screenX, renderY);
         renderY -= 22.0F * Settings.scale;
         
@@ -777,7 +841,17 @@ public class StatsScreenPatch {
             } else {
                 displayName = what.toString();
             }
-            return displayName + " " + color + String.format("%.1f", c.percent()) + "% " + c.winLoss();
+            // 商店的 win 同样只是「次数」，percent() 恒为 100%。
+            // 商店总数按「遇到的商店」计，其余行按「购买总次数」计。
+            if ("商店总数".equals(what)) {
+                return displayName + " " + color + shopTotal + " 次";
+            }
+            if ("有效商店数".equals(what)) {
+                // 只写率：分母（商店总数）就在上一行，再写 (107/111) 会把右列挤掉
+                return displayName + " " + color + sharePercent(c.total(), shopTotal) + " 有效";
+            }
+            // 商品表看的是「买了几次」，不是占比
+            return displayName + " " + color + c.total() + " 次";
         });
         
         // 计算渲染后的高度偏移（最多显示32项）
@@ -786,6 +860,233 @@ public class StatsScreenPatch {
         renderY -= 100 * Settings.scale;
         
         return renderY;
+    }
+
+    private static int totalActionCount(List<Rate<Object>> actions, String totalKey) {
+        for (Rate<Object> rate : actions) {
+            if (rate != null && totalKey.equals(rate.what)) {
+                return rate.total();
+            }
+        }
+        int sum = 0;
+        for (Rate<Object> rate : actions) {
+            if (rate != null) {
+                sum += rate.total();
+            }
+        }
+        return sum;
+    }
+
+    private static int shopPurchaseCount(List<Rate<Object>> actions) {
+        int sum = 0;
+        for (Rate<Object> rate : actions) {
+            if (rate == null) {
+                continue;
+            }
+            Object what = rate.what;
+            if ("商店总数".equals(what) || "有效商店数".equals(what)) {
+                continue;
+            }
+            sum += rate.total();
+        }
+        return sum;
+    }
+
+    private static String shareText(int count, int total) {
+        if (total <= 0) {
+            return String.valueOf(count);
+        }
+        return String.format("%.1f%% (%d/%d)", 100.0D * count / total, count, total);
+    }
+
+    // 不设额外下限：门槛完全交给界面顶部的「样本量」下拉（0-10，默认 0 = 不限）。
+    // 原值 10 会盖住下拉，玩家调到 0 也只剩下候选 ≥10 的卡。
+    private static final int MIN_UPGRADE_OWNED = 0;
+
+    /**
+     * 火堆偏好：同一批火堆决策上的两层视图。
+     *
+     * 选项层回答「这次火堆为什么没敲卡」：每个选项（升级/睡觉/回忆/抽烟/举重/挖掘）
+     * 的分母是它<b>真正可选</b>的次数，所以抽烟只在有和平烟斗的 120 次里算，
+     * 睡觉则是每次火堆都能选。倍数 = 该选项被选概率 ÷ 随机挑一个的期望概率。
+     * 回忆拆「强制」：要进第四幕就必须在前三幕消耗一个火堆拿红钥匙，是固定成本，
+     * 因此第三幕回忆占比高不是偏好，是亏损掉的一个火堆。
+     *
+     * 卡牌层回答「有这些候选时，哪张更值得敲」：每次锻造的分母是当时未升级卡牌种类数，
+     * 同名多张只算一个选项。倍数 = 该卡被敲概率 ÷ 随机基线。带 * 的卡有若干次锻造
+     * 因卡组无法重建（星盘/空鸟笼）没能计入，这类对局以 A 口列（导出表）为准。
+     */
+    private static void renderCampfireUpgradePref(StatsScreen s, SpriteBatch sb, float screenX) {
+        float renderY = getScrollY(s);
+        ClassStat cs = moreStatsScreen.getClassStat();
+
+        renderY = renderUpgradePrefAct(sb, screenX, renderY, 1, "第一幕 · 火堆偏好", cs);
+        renderY = renderUpgradePrefAct(sb, screenX, renderY, 2, "第二幕 · 火堆偏好", cs);
+        renderY = renderUpgradePrefAct(sb, screenX, renderY, 3, "第三幕 · 火堆偏好", cs);
+        renderY = renderUpgradePrefAct(sb, screenX, renderY, 4, "第四幕 · 火堆偏好", cs);
+        renderUpgradePrefAct(sb, screenX, renderY, 0, "四幕合计 · 火堆偏好", cs);
+    }
+
+    private static float renderUpgradePrefAct(SpriteBatch sb,
+                                              float screenX,
+                                              float renderY,
+                                              int act,
+                                              String actName,
+                                              ClassStat cs) {
+        final String color = getCharColor();
+        final int visits = cs.campfireVisits[act];
+        renderHeader(sb, colorForClass(actName), screenX, renderY);
+        renderY -= 22.0F * Settings.scale;
+
+        // 概览：平均池子大小决定随机基线
+        final double baseline = cs.campfireUpgradeBaseline[act];
+        final int ok = cs.campfireRebuildOk[act];
+        final int miss = cs.campfireRebuildMiss[act];
+        String left = "火堆 " + visits + " 次 · 锻造 " + sharePercent(cs.campfireSmiths[act], visits)
+                + " NL 平均候选 " + String.format("%.1f", cs.campfireUpgradeAvgOptions[act]) + " 个"
+                + " · 随机基线 " + String.format("%.1f%%", baseline) + "（倍 = 占比÷基线）";
+        String right = "重建覆盖 " + ok + "/" + (ok + miss)
+                + " (" + sharePercent(ok, ok + miss) + ")";
+        if (act == 0 && (cs.campfireAstrolabeRuns > 0 || cs.campfireEmptyCageRuns > 0)) {
+            right = right + " NL 星盘 " + cs.campfireAstrolabeRuns + " 局 · 空鸟笼 "
+                    + cs.campfireEmptyCageRuns + " 局";
+        }
+        render2Columns(sb, screenX, renderY, left, right);
+        renderY -= (act == 0 ? 120.0F : 82.0F) * Settings.scale;
+
+        // 睡觉单列：约束是血量，不和「敲哪张 / 用哪个遗物」抢同一次选择
+        ClassStat.CampfireOption sleep = null;
+        for (ClassStat.CampfireOption option : campfireOptionsOf(cs, act)) {
+            if (option != null && "REST".equals(option.key)) {
+                sleep = option;
+            }
+        }
+        if (sleep != null && sleep.available > 0) {
+            String sleepLine = "睡觉 " + String.format("%.1f%%", sleep.percent())
+                    + " (" + sleep.chosen + "/" + sleep.available + ")";
+            render2Columns(sb, screenX, renderY, sleepLine, "");
+            renderY -= 38.0F * Settings.scale + 8.0F * Settings.scale;
+        }
+
+        // 统一榜：每张可敲的牌 + 抽烟/举重/挖掘/回忆，按占比降序，同一把尺子
+        List<ClassStat.CampfireShare> rows = campfireDistOf(cs, act);
+        if (!rows.isEmpty()) {
+            renderT(sb, screenX, renderY, UPGRADE_ROWS, rows, r -> {
+                String name;
+                if (r.card) {
+                    name = NameMapper.toChinese(((Card) r.what).name);
+                } else {
+                    name = optionZh((String) r.what);
+                }
+                boolean missed = r.card && cs.campfireUpgradeMissCard != null
+                        && cs.campfireUpgradeMissCard.containsKey(r.what);
+                double mult = baseline > 0.0D ? r.percent() / baseline : 0.0D;
+                return name + " " + String.format("%.1f%%", r.percent())
+                        + " " + color + String.format("%.1f倍", mult)
+                        + " " + color + "(" + r.chosen + "/" + r.visits + ")"
+                        + (missed ? "*" : "");
+            });
+        }
+
+        int displayCount = Math.min(rows.size(), UPGRADE_ROWS);
+        renderY -= 22.0F * Settings.scale * displayCount;
+        renderY -= 100 * Settings.scale;
+        return renderY;
+    }
+
+    private static List<ClassStat.CampfireShare> campfireDistOf(ClassStat cs, int act) {
+        switch (act) {
+            case 1: return cs.campfireChoiceDistAct1;
+            case 2: return cs.campfireChoiceDistAct2;
+            case 3: return cs.campfireChoiceDistAct3;
+            case 4: return cs.campfireChoiceDistAct4;
+            default: return cs.campfireChoiceDistTotal;
+        }
+    }
+
+    /** 火堆偏好每幕最多显示多少条（超过靠滚动）。 */
+    private static final int UPGRADE_ROWS = 50;
+
+    /**
+     * 六个火堆选项的占比：被选 ÷ 该选项真正可选的次数，**按占比从高到低排名**。
+     *
+     * 升级、睡觉、回忆、抽烟、举重、挖掘是同一次决策里的平级选项，谁高谁低就是玩家的取舍，
+     * 所以不再按固定顺序摆，直接按被选概率排。不可选的（咖啡杯禁用睡觉、锤子禁用升级、
+     * 没遗物的抽烟/举重/挖掘、已经用过的回忆）根本不参与分母，这里也不会出现。
+     *
+     * 行格式与卡牌层一致：`名称 占比 倍数 (被选/可选)`。倍数用选项层自己的基线
+     * （100 ÷ 该幕平均可选项数），所以选项之间可以比，但不能拿去和卡牌的倍数比 ——
+     * 卡牌的分母是「可升级的卡种数」，两者不是同一把尺子。
+     */
+    private static float renderCampfireOptionWeights(SpriteBatch sb, float screenX, float renderY,
+                                                     int act, ClassStat cs) {
+        List<ClassStat.CampfireOption> options = campfireOptionsOf(cs, act);
+        if (options == null || options.isEmpty()) {
+            return renderY;
+        }
+        List<ClassStat.CampfireOption> shown = new ArrayList<ClassStat.CampfireOption>();
+        for (ClassStat.CampfireOption o : options) {
+            if (o != null && o.available > 0) {
+                shown.add(o);
+            }
+        }
+        Collections.sort(shown, new Comparator<ClassStat.CampfireOption>() {
+            @Override
+            public int compare(ClassStat.CampfireOption a, ClassStat.CampfireOption b) {
+                return Double.compare(b.percent(), a.percent());
+            }
+        });
+
+        final String color = getCharColor();
+        StringBuilder left = new StringBuilder();
+        StringBuilder right = new StringBuilder();
+        int leftRows = 0;
+        int rightRows = 0;
+        for (int i = 0; i < shown.size(); i++) {
+            ClassStat.CampfireOption o = shown.get(i);
+            String line = optionZh(o.key)
+                    + " " + String.format("%.1f%%", o.percent())
+                    + " " + color + String.format("%.1f倍", o.multiple())
+                    + " " + color + "(" + o.chosen + "/" + o.available + ")";
+            // 左列放排名前一半，右列放后半；不足 4 项时全部靠左，避免右侧孤零零一行
+            if (i < (shown.size() + 1) / 2) {
+                left.append(leftRows++ > 0 ? " NL " : "").append(line);
+            } else {
+                right.append(rightRows++ > 0 ? " NL " : "").append(line);
+            }
+        }
+        render2Columns(sb, screenX, renderY, left.toString(), right.toString());
+        int rows = Math.max(leftRows, rightRows);
+        return renderY - rows * 38.0F * Settings.scale - 10.0F * Settings.scale;
+    }
+
+    private static String optionZh(String key) {
+        if ("SMITH".equals(key)) return "升级";
+        if ("REST".equals(key)) return "睡觉";
+        if ("RECALL".equals(key)) return "回忆";
+        if ("PURGE".equals(key)) return "抽烟";
+        if ("LIFT".equals(key)) return "举重";
+        if ("DIG".equals(key)) return "挖掘";
+        return key;
+    }
+
+    private static final int OPTION_RECALL_INDEX = 2;
+
+    private static List<ClassStat.CampfireOption> campfireOptionsOf(ClassStat cs, int act) {
+        switch (act) {
+            case 1: return cs.campfireOptionsAct1;
+            case 2: return cs.campfireOptionsAct2;
+            case 3: return cs.campfireOptionsAct3;
+            case 4: return cs.campfireOptionsAct4;
+            default: return cs.campfireOptionsTotal;
+        }
+    }
+
+    private static String sharePercent(int count, int total) {
+        if (total <= 0) {
+            return "0.0%";
+        }
+        return String.format("%.1f%%", 100.0D * count / total);
     }
 
     private static void renderTierListExportButton(SpriteBatch sb,
@@ -826,6 +1127,14 @@ public class StatsScreenPatch {
             text = Localization.get(LocalizationKeys.UI_EXPORT_ALL_TIER_LIST);
         } else if (statTypeIndex == 8) {
             text = Localization.get(LocalizationKeys.UI_EXPORT_MONSTER_TIER);
+        } else if (statTypeIndex == 14) {
+            text = Localization.get(LocalizationKeys.UI_EXPORT_CAMPFIRE_TIER);
+        } else if (statTypeIndex == 15) {
+            text = Localization.get(LocalizationKeys.UI_EXPORT_SHOP_TIER);
+        } else if (statTypeIndex == 16) {
+            text = Localization.get(LocalizationKeys.UI_EXPORT_CAMPFIRE_UPGRADE_TIER);
+        } else if (statTypeIndex == 4) {
+            text = Localization.get(LocalizationKeys.UI_EXPORT_NEOW_TIER);
         } else {
             text = Localization.get(LocalizationKeys.UI_EXPORT_TIER_LIST);
         }
@@ -839,9 +1148,14 @@ public class StatsScreenPatch {
 
     private static boolean isTierListPage(int statTypeIndex) {
         // 0: 总体统计，导出全部四组 + 全部统计 CSV；1/2: 卡牌；5: BOSS 遗物；
-        // 8: 遭遇战平均战损，导出怪物危险度梯度（独立导出包，不改动原统计）
+        // 8: 遭遇战平均战损，导出怪物危险度梯度（独立导出包，不改动原统计）；
+        // 4: 尼奥开局选项（每个「奖励 + 代价」单独一行，按选中次数排名）；
+        // 14/15: 火堆行动 / 商店行动（按幕拆「升级目标卡」「购买商品」等分组）
+        // 16: 火堆偏好（行动占比 + 升级次数 / 拥有张数，按幕拆，合计放最后）
         return statTypeIndex == 0 || statTypeIndex == 1 || statTypeIndex == 2
-                || statTypeIndex == 5 || statTypeIndex == 8;
+                || statTypeIndex == 4 || statTypeIndex == 5
+                || statTypeIndex == 14 || statTypeIndex == 15 || statTypeIndex == 16
+                || statTypeIndex == 8;
     }
 
     private static TierListScope scopeForStatType(int statTypeIndex) {
@@ -852,8 +1166,16 @@ public class StatsScreenPatch {
                 return TierListScope.CARDS_ACT1;
             case 2:
                 return TierListScope.CARDS_AFTER_ACT1;
+            case 4:
+                return TierListScope.NEOW;
             case 5:
                 return TierListScope.BOSS_RELICS;
+            case 14:
+                return TierListScope.CAMPFIRE;
+            case 15:
+                return TierListScope.SHOP;
+            case 16:
+                return TierListScope.CAMPFIRE_UPGRADE;
             default:
                 return TierListScope.ALL;
         }
@@ -1025,6 +1347,9 @@ public class StatsScreenPatch {
                 break;
             case 15: // Shop Actions
                 renderShopActions(s, sb, screenX);
+                break;
+            case 16: // Campfire upgrade preference
+                renderCampfireUpgradePref(s, sb, screenX);
                 break;
         }
 

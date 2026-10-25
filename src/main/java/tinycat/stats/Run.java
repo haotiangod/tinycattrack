@@ -42,6 +42,7 @@ public class Run implements Comparable<Run> {
 
     public final boolean isHeartKill;
     public final boolean isA20;
+    public final int ascensionLevel;
     public final boolean abandoned;
     public final boolean seeded;
     public final long timestamp;
@@ -73,6 +74,8 @@ public class Run implements Comparable<Run> {
     public final List<BossRelicChoiceStats> bossRelicChoiceStats;
     public final List<EncounterStats> encounterStats = new ArrayList<>();
     public final List<String> relics;
+    /** 遗物首次获得的楼层：relics_obtained 记录 + 商店购买记录，用于判断火堆选项当时是否可选。 */
+    public final Map<String, Integer> relicFloors = new HashMap<>();
     public final List<EventStats> eventStats;
     public final List<String> itemsPurged;  // 删除的卡牌列表
     public final List<Integer> itemsPurgedFloors;  // 删牌发生的楼层
@@ -89,6 +92,7 @@ public class Run implements Comparable<Run> {
         this.playerClass = playerClass;
         this.isHeartKill = isHeartKill();
         this.isA20 = runData.is_ascension_mode && runData.ascension_level == 20;
+        this.ascensionLevel = runData.is_ascension_mode ? runData.ascension_level : 0;
         this.timestamp = Long.parseLong(runData.timestamp);
 
         boolean abandoned = false;
@@ -115,6 +119,7 @@ public class Run implements Comparable<Run> {
         itemPurchaseFloors = runData.item_purchase_floors;
         shopContents = runData.shop_contents;
         neowBonusLog = runData.neow_bonus_log;
+        captureRelicFloors();
 
         Pair<Integer, Integer> enemiesKilled = enemiesKilled();
         this.enemiesKilled = enemiesKilled.getLeft();
@@ -469,6 +474,39 @@ public class Run implements Comparable<Run> {
             case "THREE_ENEMY_KILL":     return 40;
             default:                     return 45;
         }
+    }
+
+    /**
+     * 记录遗物首次获得的楼层。relics_obtained 带楼层，覆盖宝箱/精英/Boss/事件；
+     * 商店购买的遗物再用 item_purchase_floors 补一次，防止 RunHistory+ 漏记。
+     */
+    private void captureRelicFloors() {
+        for (ObtainStats relic : runData.relics_obtained) {
+            if (relic == null || relic.key == null) {
+                continue;
+            }
+            Integer old = relicFloors.get(relic.key);
+            if (old == null || relic.floor < old) {
+                relicFloors.put(relic.key, relic.floor);
+            }
+        }
+        for (int i = 0; i < itemsPurchased.size(); i++) {
+            String name = itemsPurchased.get(i);
+            if (name == null) {
+                continue;
+            }
+            int floor = i < itemPurchaseFloors.size() ? itemPurchaseFloors.get(i) : 1;
+            Integer old = relicFloors.get(name);
+            if (old == null || floor < old) {
+                relicFloors.put(name, floor);
+            }
+        }
+    }
+
+    /** 该遗物在第 floor 层（含）之前是否已经获得。 */
+    public boolean ownsRelicAt(String relic, int floor) {
+        Integer obtained = relicFloors.get(relic);
+        return obtained != null && obtained <= floor;
     }
 
     private void captureBossFloors() {

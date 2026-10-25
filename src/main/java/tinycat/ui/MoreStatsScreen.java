@@ -64,6 +64,7 @@ public class MoreStatsScreen implements DropdownMenuListener {
                     Localization.get("ui.event_win_rate_per_act"),
                     Localization.get("ui.campfire_actions"),
                     Localization.get("ui.shop_actions"),
+                    Localization.get(LocalizationKeys.UI_CAMPFIRE_UPGRADE_PREF),
             };
         }
         return statTypes;
@@ -174,7 +175,6 @@ public class MoreStatsScreen implements DropdownMenuListener {
 
     private static ClassStat[] getClassStats(YearMonth startDate,
                                              YearMonth endDate,
-                                             int classIndex,
                                              boolean includeAbandons,
                                              SeedFilter seedFilter) {
         ClassStat
@@ -194,25 +194,11 @@ public class MoreStatsScreen implements DropdownMenuListener {
                 new ClassStat(tinycat.runHistoryManager.getWatcherRuns(startDate, endDate, includeAbandons,
                         seedFilter), false);
 
-        ClassStat allCS;
-        switch (classIndex) {
-            case 1:
-                allCS = ironcladCS;
-                break;
-            case 2:
-                allCS = silentCS;
-                break;
-            case 3:
-                allCS = defectCS;
-                break;
-            case 4:
-                allCS = watcherCS;
-                break;
-            default:
-                allCS =
-                        new ClassStat(tinycat.runHistoryManager.getAllRuns(startDate, endDate, includeAbandons,
-                                seedFilter), true);
-        }
+        // 注意：classStats[4] 必须始终是"四个角色的真汇总"，不能按当前选中角色做别名，
+        // 否则导出的「全角色汇总」行会等于当前角色（例如选机器人时 406 局被当成全角色 406 局）。
+        ClassStat allCS =
+                new ClassStat(tinycat.runHistoryManager.getAllRuns(startDate, endDate, includeAbandons,
+                        seedFilter), true);
         return new ClassStat[]{ironcladCS, silentCS, defectCS, watcherCS, allCS};
     }
 
@@ -221,6 +207,6 @@ public class MoreStatsScreen implements DropdownMenuListener {
                                int classIndex,
                                boolean includeAbandons,
                                SeedFilter seedFilter) {
-        classStats = getClassStats(startDate, endDate, classIndex, includeAbandons, seedFilter);
+        classStats = getClassStats(startDate, endDate, includeAbandons, seedFilter);
     }
 }
